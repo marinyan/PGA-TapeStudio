@@ -16,6 +16,23 @@ public static class Tests {
         var recording=new short[source.Length+lag+24000]; for(int i=0;i<source.Length;i++) recording[i+lag]=(short)(source[i]*gain); return recording;
     }
     public static void Main() {
+        var low=Stereo(new short[]{0,1000,-2000,4000});
+        // Make the right channel louder than the left to test linked stereo normalization.
+        low[14]=0x40; low[15]=0x1f; // 8000
+        var normalized=DigitalGain.Normalize(low,CancellationToken.None);
+        int ceiling=(int)Math.Floor(32768*Math.Pow(10,-1.0/20));
+        int actualPeak=0; for(int i=0;i<low.Length;i+=2) actualPeak=Math.Max(actualPeak,Math.Abs((int)BitConverter.ToInt16(low,i)));
+        Check(normalized.GainDb>0 && actualPeak<=ceiling && actualPeak>ceiling*0.985,"automatic gain raises the loudest channel to just below -1 dBFS");
+        Check(Math.Abs(BitConverter.ToInt16(low,12)*2-BitConverter.ToInt16(low,14))<=1 && BitConverter.ToInt16(low,0)==0,"automatic gain preserves stereo balance and silence");
+        var hot=DigitalGain.Normalize(Stereo(new short[]{short.MinValue,short.MaxValue}),CancellationToken.None);
+        Check(hot.GainDb<0 && BitConverter.ToInt16(hot.Pcm,0)>short.MinValue && Math.Abs((int)BitConverter.ToInt16(hot.Pcm,0))<=ceiling,"full scale including -32768 is attenuated without overflow");
+        var silentGain=DigitalGain.Normalize(new byte[400],CancellationToken.None);
+        Check(silentGain.Silent && silentGain.GainDb==0,"silent source is not amplified");
+        var tiny=DigitalGain.Normalize(Stereo(new short[]{1,-1}),CancellationToken.None);
+        Check(tiny.GainDb<96 && BitConverter.ToInt16(tiny.Pcm,0)>28000,"one-LSB input has finite gain without overflow");
+        var gainCancel=new CancellationTokenSource(); gainCancel.Cancel(); bool gainStopped=false;
+        try { DigitalGain.Normalize(new byte[400],gainCancel.Token); } catch(OperationCanceledException) { gainStopped=true; }
+        Check(gainStopped,"automatic gain analysis respects cancellation");
         var decodeOk=new RecognitionResult { Files=1, BitErrors=0, ByteErrors=0, Bytes=new byte[]{1,2,3} };
         Check(TapeRecognition.CompareBytes("test",decodeOk,decodeOk).Contains("完全一致"),"recognized identical byte streams pass equality");
         Check(TapeRecognition.CompareBytes("test",decodeOk,new RecognitionResult()).Contains("復調データなし"),"empty decoder results do not pass equality");
@@ -37,8 +54,9 @@ public static class Tests {
         Check(duplicate,"monitor allows disabled or distinct output and rejects duplicates");
         string config=Path.Combine(Path.GetTempPath(),"level-settings-test-"+Guid.NewGuid()+".xml");
         try {
-            var prefs=new AppSettings { InputName="MIC 日本語", OutputName="OUT", WholeFile=false, Seconds=1234, Speed=3, Gain=-22, LastFile="C:\\audio test\\音声.wav", Zoom=100, WaveChannel=2, AlignWaves=false };
+            var prefs=new AppSettings { InputName="MIC 日本語", OutputName="OUT", WholeFile=false, Seconds=1234, Speed=3, Gain=-22, LastFile="C:\\audio test\\音声.wav", Zoom=100, WaveChannel=2, AlignWaves=false,AutoGain=true };
             prefs.Save(config); var loaded=AppSettings.Load(config);
+            Check(loaded.AutoGain,"automatic gain setting round trip");
             Check(loaded.InputName==prefs.InputName && loaded.OutputName=="OUT" && loaded.LastFile==prefs.LastFile && loaded.Speed==3 && loaded.Gain==-22 && loaded.Seconds==1234 && !loaded.WholeFile && loaded.Zoom==100 && loaded.WaveChannel==2 && !loaded.AlignWaves,"settings round trip");
             prefs.WholeFile=true; prefs.Speed=999; prefs.MonitorEnabled=true; prefs.MonitorName="Headphones 日本語"; prefs.Save(config); loaded=AppSettings.Load(config);
             Check(loaded.WholeFile && loaded.Speed==4,"settings atomic overwrite and range validation");
@@ -112,6 +130,15 @@ public static class Tests {
             Check(whole.Length==longSource.Length*4 && BitConverter.ToInt16(whole,whole.Length-4)>1000,"whole file includes final sample beyond 120 seconds");
             var limited=Decoder.Decode(temp,1,0,1,false,CancellationToken.None);
             Check(limited.Length==192000,"limited duration still stops at requested time");
+            var gainSource=new short[96000]; for(int i=0;i<48000;i++) gainSource[i]=(short)(1000*Math.Sin(i*0.13)); gainSource[90000]=16000;
+            AudioEngine.SaveWave(temp,gainSource);
+            var autoWhole=Decoder.PrepareForPlayback(temp,-18,0,true,CancellationToken.None);
+            var autoPart=Decoder.PrepareForPlayback(temp,-40,1,true,CancellationToken.None);
+            Check(autoWhole.Pcm.Length==384000 && autoPart.Pcm.Length==192000 && autoWhole.GainDb==autoPart.GainDb,"automatic gain scans the complete WAV and keeps playback at 100 percent");
+            Check(System.Linq.Enumerable.SequenceEqual(System.Linq.Enumerable.Take(autoWhole.Pcm,192000),autoPart.Pcm),"partial automatic playback uses full-file peak and ignores manual gain");
+            var autoFast=Decoder.Prepare(temp,2,-18,0,true,false,CancellationToken.None);
+            int fastPeak=0; for(int i=0;i<autoFast.Pcm.Length;i+=2) fastPeak=Math.Max(fastPeak,Math.Abs((int)BitConverter.ToInt16(autoFast.Pcm,i)));
+            Check(autoFast.Pcm.Length==192000 && fastPeak<=ceiling && fastPeak>ceiling*0.985,"measurement automatic gain is measured after speed conversion");
         } finally { File.Delete(temp); }
     }
 }

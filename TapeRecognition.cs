@@ -30,7 +30,7 @@ public static class TapeRecognition {
             if(line=="測定上限: 全部") seconds=0;
             match=Regex.Match(line,@"^測定上限: (\d+) 秒$"); if(match.Success) seconds=int.Parse(match.Groups[1].Value);
         }
-        if(speed<0.5 || speed>4 || gain<-60 || gain>0 || seconds<0 || seconds>86400) throw new InvalidDataException("対応範囲外の測定条件です。");
+        if(speed<0.5 || speed>4 || gain<-60 || gain>96 || seconds<0 || seconds>86400) throw new InvalidDataException("対応範囲外の測定条件です。");
     }
     public static void SaveXml<T>(string path,T value) { using(var s=File.Create(path)) new XmlSerializer(typeof(T)).Serialize(s,value); }
     public static T LoadXml<T>(string path) { using(var s=File.OpenRead(path)) return (T)new XmlSerializer(typeof(T)).Deserialize(s); }

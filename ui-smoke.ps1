@@ -41,6 +41,10 @@ try {
     $model.SelectedIndex = 1
     $volume = $form.GetType().GetField('monitorVolumeSlider', $flags).GetValue($form)
     $volume.Value = 37
+    $autoGain = $form.GetType().GetField('autoGain', $flags).GetValue($form)
+    $manualGain = $form.GetType().GetField('gain', $flags).GetValue($form)
+    $autoGain.Checked = $true
+    if ($manualGain.Enabled) { throw 'Manual gain enabled during auto gain' }
     $data = New-Object System.Windows.Forms.DataObject
     $droppedPath = Join-Path $PSScriptRoot 'Tests.cs'
     $data.SetData([System.Windows.Forms.DataFormats]::FileDrop, [string[]]@($droppedPath))
@@ -54,6 +58,7 @@ try {
     if ($loaded.LastFile -ne $droppedPath -or $loaded.WholeFile) { throw 'UI did not persist selection' }
     if ($loaded.RecognitionModel -ne 'PC_6001') { throw 'Recognition model not saved' }
     if ($loaded.MonitorVolumePercent -ne 37) { throw 'Monitor volume not saved' }
+    if (!$loaded.AutoGain) { throw 'Automatic gain not saved' }
     $second = New-Object RecordingLevelChecker.MainForm($testSettings)
     try {
         $restoredFile = $second.GetType().GetField('file', $flags).GetValue($second)
@@ -63,16 +68,23 @@ try {
         if ($restoredModel.Text -ne 'PC_6001') { throw 'Recognition model not restored' }
         $restoredVolume = $second.GetType().GetField('monitorVolumeSlider', $flags).GetValue($second)
         if ($restoredVolume.Value -ne 37) { throw 'Monitor volume not restored' }
+        $restoredAuto = $second.GetType().GetField('autoGain', $flags).GetValue($second)
+        $restoredGain = $second.GetType().GetField('gain', $flags).GetValue($second)
+        if (!$restoredAuto.Checked -or $restoredGain.Enabled) { throw 'Automatic gain not restored' }
     } finally { $second.Dispose() }
     $busyMethod = $form.GetType().GetMethod('SetBusy', $flags)
     $busyMethod.Invoke($form, @($true)) | Out-Null
     if (!$volume.Enabled) { throw 'Live monitor volume disabled while busy' }
+    if ($autoGain.Enabled -or $manualGain.Enabled) { throw 'Gain editable while busy' }
     $volume.Value = 62
     $liveVolume = $form.GetType().GetField('monitorLevel', $flags).GetValue($form)
     if ($liveVolume.Percent -ne 62) { throw 'Live monitor volume not forwarded' }
     $enter.Invoke($form, @($drag.PSObject.BaseObject)) | Out-Null
     if ($drag.Effect -ne [System.Windows.Forms.DragDropEffects]::None) { throw 'Busy UI accepted a drop' }
     $busyMethod.Invoke($form, @($false)) | Out-Null
+    if ($manualGain.Enabled) { throw 'Automatic mode did not keep manual gain disabled' }
+    $autoGain.Checked = $false
+    if (!$manualGain.Enabled) { throw 'Manual gain not restored after auto mode' }
     Write-Output 'PASS: UI drop selection, autosave, restart restore and busy drop rejection (no playback)'
 } finally {
     $form.Dispose()

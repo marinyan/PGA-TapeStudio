@@ -7,6 +7,7 @@ namespace RecordingLevelChecker {
 public sealed class AppSettings {
     public string InputName="", OutputName="", LastFile="", MonitorName="";
     public bool MonitorEnabled;
+    public bool AutoGain;
     public int MonitorVolumePercent=100;
     public string RecognitionModel="", RecognitionEngine="";
     public decimal Speed=2, Gain=-18, Seconds=15, Zoom=50;
