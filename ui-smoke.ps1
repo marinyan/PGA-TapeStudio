@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-[System.Reflection.Assembly]::LoadFrom((Join-Path $PSScriptRoot 'bin\RecordingLevelChecker.exe')) | Out-Null
+[System.Reflection.Assembly]::LoadFrom((Join-Path $PSScriptRoot 'bin\pga.exe')) | Out-Null
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $testSettings = Join-Path $PSScriptRoot ('bin\ui-test-' + [Guid]::NewGuid().ToString('N') + '.xml')
 $form = New-Object RecordingLevelChecker.MainForm($testSettings)

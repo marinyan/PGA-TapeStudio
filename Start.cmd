@@ -5,4 +5,4 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-start "" "%~dp0bin\RecordingLevelChecker.exe"
+start "" "%~dp0bin\pga.exe"

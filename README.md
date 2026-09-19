@@ -4,7 +4,7 @@ PGAはテープの「ピーガー」音から。Windows用の、**保存済み�
 
 ## 起動
 
-`Start.cmd` をダブルクリックしてください。Windows付属の .NET Framework のコンパイラーでビルドして起動します。ビルド後は `bin\RecordingLevelChecker.exe` から直接起動できます。
+`Start.cmd` をダブルクリックしてください。Windows付属の .NET Framework のコンパイラーでビルドして起動します。ビルド後は `bin\pga.exe` から直接起動できます。
 
 音声の読み込みには **FFmpeg** が必要です。PATHにある `ffmpeg.exe`、または `bin\ffmpeg.exe` を使用します。このPCでは既存のFFmpegを使って動作確認しています。追加のPython・Node・NuGetパッケージは不要です。
 

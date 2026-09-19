@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -67,7 +67,7 @@ public static class TapeRecognition {
     public static RecognitionResult RunEngine(string engine,string model,string wave,double frequency,string directory,CancellationToken token) {
         string id=Guid.NewGuid().ToString("N"), job=Path.Combine(directory,id+".job.xml"), output=Path.Combine(directory,id+".result.xml");
         SaveXml(job,new RecognitionJob { EnginePath=Path.GetFullPath(engine), Model=model, WavePath=wave, FrequencyPercent=frequency });
-        var info=new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"RecordingLevelChecker.exe"),"--recognize \""+job+"\" \""+output+"\"") { UseShellExecute=false, CreateNoWindow=true, WindowStyle=ProcessWindowStyle.Hidden, WorkingDirectory=directory };
+        var info=new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"pga.exe"),"--recognize \""+job+"\" \""+output+"\"") { UseShellExecute=false, CreateNoWindow=true, WindowStyle=ProcessWindowStyle.Hidden, WorkingDirectory=directory };
         using(var process=Process.Start(info)) {
             var clock=Stopwatch.StartNew();
             while(!process.WaitForExit(100)) {
