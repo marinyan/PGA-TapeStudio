@@ -16,6 +16,9 @@ public static class Tests {
         var recording=new short[source.Length+lag+24000]; for(int i=0;i<source.Length;i++) recording[i+lag]=(short)(source[i]*gain); return recording;
     }
     public static void Main() {
+        byte[] phase=new byte[]{0,0,1,0,0xff,0x7f,0,0x80};
+        DigitalGain.InvertPolarity(phase,CancellationToken.None);
+        Check(BitConverter.ToInt16(phase,0)==0 && BitConverter.ToInt16(phase,2)==-1 && BitConverter.ToInt16(phase,4)==-32767 && BitConverter.ToInt16(phase,6)==32767,"polarity inversion covers both channels and saturates negative full scale");
         var low=Stereo(new short[]{0,1000,-2000,4000});
         // Make the right channel louder than the left to test linked stereo normalization.
         low[14]=0x40; low[15]=0x1f; // 8000
@@ -57,6 +60,9 @@ public static class Tests {
             var prefs=new AppSettings { InputName="MIC 日本語", OutputName="OUT", WholeFile=false, Seconds=1234, Speed=3, Gain=-22, LastFile="C:\\audio test\\音声.wav", Zoom=100, WaveChannel=2, AlignWaves=false,AutoGain=true };
             prefs.Save(config); var loaded=AppSettings.Load(config);
             Check(loaded.AutoGain,"automatic gain setting round trip");
+            Check(!loaded.InvertPhase,"old settings default to normal polarity");
+            prefs.InvertPhase=true; prefs.Save(config);
+            Check(AppSettings.Load(config).InvertPhase,"phase inversion setting round trip");
             Check(loaded.InputName==prefs.InputName && loaded.OutputName=="OUT" && loaded.LastFile==prefs.LastFile && loaded.Speed==3 && loaded.Gain==-22 && loaded.Seconds==1234 && !loaded.WholeFile && loaded.Zoom==100 && loaded.WaveChannel==2 && !loaded.AlignWaves,"settings round trip");
             prefs.WholeFile=true; prefs.Speed=999; prefs.MonitorEnabled=true; prefs.MonitorName="Headphones 日本語"; prefs.Save(config); loaded=AppSettings.Load(config);
             Check(loaded.WholeFile && loaded.Speed==4,"settings atomic overwrite and range validation");
@@ -137,6 +143,22 @@ public static class Tests {
             Check(autoWhole.Pcm.Length==384000 && autoPart.Pcm.Length==192000 && autoWhole.GainDb==autoPart.GainDb,"automatic gain scans the complete WAV and keeps playback at 100 percent");
             Check(System.Linq.Enumerable.SequenceEqual(System.Linq.Enumerable.Take(autoWhole.Pcm,192000),autoPart.Pcm),"partial automatic playback uses full-file peak and ignores manual gain");
             var autoFast=Decoder.Prepare(temp,2,-18,0,true,false,CancellationToken.None);
+            var invertedAuto=Decoder.PrepareForPlayback(temp,-18,0,true,CancellationToken.None,true);
+            bool exactInverse=autoWhole.Pcm.Length==invertedAuto.Pcm.Length;
+            for(int i=0;exactInverse && i<autoWhole.Pcm.Length;i+=2) exactInverse=BitConverter.ToInt16(autoWhole.Pcm,i)==-BitConverter.ToInt16(invertedAuto.Pcm,i);
+            Check(exactInverse && invertedAuto.InvertPhase && invertedAuto.GainDb==autoWhole.GainDb,"automatic gain and playback polarity inversion preserve timing and peak");
+            var manualNormal=Decoder.Prepare(temp,2,-18,1,false,false,CancellationToken.None);
+            var manualInverted=Decoder.Prepare(temp,2,-18,1,false,false,CancellationToken.None,true);
+            exactInverse=manualNormal.Pcm.Length==manualInverted.Pcm.Length;
+            for(int i=0;exactInverse && i<manualNormal.Pcm.Length;i+=2) exactInverse=BitConverter.ToInt16(manualNormal.Pcm,i)==-BitConverter.ToInt16(manualInverted.Pcm,i);
+            Check(exactInverse && manualInverted.InvertPhase,"measurement polarity inversion follows speed and manual gain");
+            string phaseLog=temp+".txt";
+            try {
+                File.WriteAllText(phaseLog,invertedAuto.OutputDescription);
+                Check(TapeRecognition.ReadPhaseInversion(phaseLog),"recorded polarity is restored from measurement log");
+                File.WriteAllText(phaseLog,"old log");
+                Check(!TapeRecognition.ReadPhaseInversion(phaseLog),"legacy recording logs use normal polarity");
+            } finally { File.Delete(phaseLog); }
             int fastPeak=0; for(int i=0;i<autoFast.Pcm.Length;i+=2) fastPeak=Math.Max(fastPeak,Math.Abs((int)BitConverter.ToInt16(autoFast.Pcm,i)));
             Check(autoFast.Pcm.Length==192000 && fastPeak<=ceiling && fastPeak>ceiling*0.985,"measurement automatic gain is measured after speed conversion");
         } finally { File.Delete(temp); }

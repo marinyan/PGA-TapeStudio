@@ -32,6 +32,9 @@ public static class TapeRecognition {
         }
         if(speed<0.5 || speed>4 || gain<-60 || gain>96 || seconds<0 || seconds>86400) throw new InvalidDataException("対応範囲外の測定条件です。");
     }
+    public static bool ReadPhaseInversion(string path) {
+        return File.ReadLines(path).Any(line=>line=="位相反転: True");
+    }
     public static void SaveXml<T>(string path,T value) { using(var s=File.Create(path)) new XmlSerializer(typeof(T)).Serialize(s,value); }
     public static T LoadXml<T>(string path) { using(var s=File.OpenRead(path)) return (T)new XmlSerializer(typeof(T)).Deserialize(s); }
     // This adapter uses the user's installed DLE; no DLE binary or source is redistributed.
