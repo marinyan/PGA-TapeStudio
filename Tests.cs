@@ -21,16 +21,16 @@ public static class Tests {
         return Math.Sqrt(re*re+im*im);
     }
     static double CircuitMagnitude(string model,int hz) {
-        double r=model=="MSX"?4700:model.StartsWith("PC_88")?560:2200;
-        double load=model=="MSX"?4800:model.StartsWith("PC_88")?5133:12100;
-        double c=model=="MSX"?22e-9:model.StartsWith("PC_88")?100e-9:47e-9;
-        double coupling=model=="MSX"?1e-6:model.StartsWith("PC_88")?0:100e-9;
+        double r=model=="MSX"?4700:model=="PC_8001"?550:model.StartsWith("PC_88")?560:2200;
+        double load=model=="MSX"?4800:(model=="PC_8001" || model.StartsWith("PC_88"))?5133:12100;
+        double c=model=="MSX"?22e-9:(model=="PC_8001" || model.StartsWith("PC_88"))?100e-9:47e-9;
+        double coupling=model=="MSX"?1e-6:(model=="PC_8001" || model.StartsWith("PC_88"))?0:100e-9;
         double omega=96000*Math.Tan(Math.PI*hz/48000),q=omega*c*load;
         double zr=load/(1+q*q),zi=-load*q/(1+q*q),si=coupling==0?0:-1/(omega*coupling);
         return Math.Sqrt((zr*zr+zi*zi)/((r+zr)*(r+zr)+(si+zi)*(si+zi)))*(r+load)/load;
     }
     static void CircuitTests() {
-        foreach(string model in new[]{"PC_6001","PC_6601SR","PC_8801","PC_8801mkIISR","MSX"}) {
+        foreach(string model in new[]{"PC_8001","PC_6001","PC_6601SR","PC_8801","PC_8801mkIISR","MSX"}) {
             Check(WaveformCorrection.Supported(model),model+" is enabled");
             var silence=new byte[8000]; WaveformCorrection.Apply(silence,model,CancellationToken.None);
             Check(Array.TrueForAll(silence,b=>b==0),model+" keeps digital silence");
@@ -59,6 +59,8 @@ public static class Tests {
     }
     public static void Main() {
         CircuitTests();
+        Check(!WaveformCorrection.Supported("PC_8001mkII") && !WaveformCorrection.Supported("PC_8001mkIISR"),"PC8001 circuit is restricted to the original model");
+        Check(WaveformCorrection.Description("PC_8001").Contains("RC低域通過") && !WaveformCorrection.Description("PC_8001").Contains("AC結合"),"PC8001 description identifies the low-pass circuit");
         var pulse=Stereo(new short[]{0,100,1000,300,-200,-800,-100,0,1,2,0,short.MinValue});
         var untouched=(byte[])pulse.Clone(); WaveformCorrection.Apply(untouched,WaveformCorrection.None,CancellationToken.None);
         Check(Convert.ToBase64String(pulse)==Convert.ToBase64String(untouched),"no correction is bit exact");
@@ -83,7 +85,7 @@ public static class Tests {
             Check(Convert.ToBase64String(payload)==Convert.ToBase64String(pulse),"export retains both channels exactly");
             File.WriteAllText(exported+".txt","legacy log"); Check(WaveformCorrection.ReadLog(exported+".txt")==WaveformCorrection.None,"legacy log defaults to no correction");
             File.WriteAllText(exported+".txt","波形補正機種: X1\r\n波形補正方式: logic-v1"); Check(WaveformCorrection.ReadLog(exported+".txt")=="X1","correction log restores model and algorithm version");
-            foreach(string model in new[]{"PC_6001","PC_6601SR","PC_8801","PC_8801mkIISR","MSX"}) {
+            foreach(string model in new[]{"PC_8001","PC_6001","PC_6601SR","PC_8801","PC_8801mkIISR","MSX"}) {
                 File.WriteAllText(exported+".txt","波形補正機種: "+model+"\r\n波形補正方式: logic-v1");
                 Check(WaveformCorrection.ReadLog(exported+".txt")==WaveformCorrection.None,"old no-op log remains uncorrected: "+model);
                 var prepared=Decoder.PrepareForPlayback(exported,-6,0,false,CancellationToken.None,false,model);

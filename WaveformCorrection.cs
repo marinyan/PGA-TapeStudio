@@ -9,7 +9,7 @@ public static class WaveformCorrection {
     public const string Version="logic-v1";
     public const string CircuitVersion="save-rc-v1";
     public static bool CircuitSupported(string model) {
-        return model=="PC_6001" || model=="PC_6601SR" || model=="PC_8801" || model=="PC_8801mkIISR" || model=="MSX";
+        return model=="PC_8001" || model=="PC_6001" || model=="PC_6601SR" || model=="PC_8801" || model=="PC_8801mkIISR" || model=="MSX";
     }
     public static string VersionFor(string model) { return CircuitSupported(model)?CircuitVersion:Version; }
     public static bool Supported(string model) {
@@ -22,7 +22,7 @@ public static class WaveformCorrection {
     }
     public static string Description(string model) {
         model=Validate(model);
-        if(CircuitSupported(model)) return (model=="MSX"?"MSX標準例":"SAVE回路近似")+"：矩形化＋"+(model.StartsWith("PC_88")?"RC低域通過":"AC結合・RC低域通過")+"／相対波形・実機ロード未検証";
+        if(CircuitSupported(model)) return (model=="MSX"?"MSX標準例":"SAVE回路近似")+"：矩形化＋"+(model=="PC_8001" || model.StartsWith("PC_88")?"RC低域通過":"AC結合・RC低域通過")+"／相対波形・実機ロード未検証";
         return model==None?"波形補正なし（ゲイン・位相反転は別設定）":Supported(model)?"試験的な論理波形近似。符号区間を矩形化／実機のアナログ回路は未再現":"未補正：出力回路の裏付けが不足しているため元波形を使用";
     }
     public static string ReadLog(string path) {
@@ -70,7 +70,7 @@ public static class WaveformCorrection {
     static void ApplyCircuit(byte[] pcm,string model,CancellationToken token) {
         double r1,r2,r3,c1,c2;
         if(model=="MSX") { r1=4700; r2=4700; r3=100; c1=1e-6; c2=22e-9; }
-        else if(model.StartsWith("PC_88")) { r1=560; r2=5100; r3=33; c1=0; c2=100e-9; }
+        else if(model=="PC_8001" || model.StartsWith("PC_88")) { r1=model=="PC_8001"?550:560; r2=5100; r3=33; c1=0; c2=100e-9; }
         else { r1=2200; r2=12000; r3=100; c1=100e-9; c2=47e-9; }
         double load=r2+r3,k=96000,b0,b1,b2,a0,a1,a2;
         if(c1==0) {
