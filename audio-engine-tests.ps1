@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $source = [IO.File]::ReadAllText((Join-Path $root 'RecordingLevelChecker.cs'))
 # Replace only the WinMM imports in a throwaway build. No hardware is opened.
@@ -19,7 +19,7 @@ $source = [regex]::Replace($source, $pattern, [System.Text.RegularExpressions.Ma
 $generated = Join-Path $root 'bin\AudioEngineUnderTest.cs'
 [IO.File]::WriteAllText($generated, $source)
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-& $compiler /nologo /target:exe /main:RecordingLevelChecker.AudioEngineTests /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:"$root\bin\AudioEngineTests.exe" $generated "$root\AudioEngineTests.cs" "$root\AppSettings.cs" "$root\SignalComparison.cs" "$root\TapeRecognition.cs"
+& $compiler /nologo /target:exe /main:RecordingLevelChecker.AudioEngineTests /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:"$root\bin\AudioEngineTests.exe" $generated "$root\AudioEngineTests.cs" "$root\AppSettings.cs" "$root\SignalComparison.cs" "$root\TapeRecognition.cs" "$root\WaveformCorrection.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Audio engine test build failed' }
 & "$root\bin\AudioEngineTests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Audio engine tests failed' }

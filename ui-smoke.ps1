@@ -60,6 +60,9 @@ try {
     if ($form.GetType().GetField('pitch', $flags)) { throw 'Obsolete pitch control remains' }
     $model = $form.GetType().GetField('recognitionModel', $flags).GetValue($form)
     $model.SelectedIndex = 1
+    $correction = $form.GetType().GetField('correctionModel', $flags).GetValue($form)
+    $correction.SelectedItem = 'X1'
+    $export = $form.GetType().GetField('exportAudio', $flags).GetValue($form)
     $volume = $form.GetType().GetField('monitorVolumeSlider', $flags).GetValue($form)
     $volume.Value = 37
     $autoGain = $form.GetType().GetField('autoGain', $flags).GetValue($form)
@@ -80,6 +83,7 @@ try {
     $loaded = [RecordingLevelChecker.AppSettings]::Load($testSettings)
     if ($loaded.LastFile -ne $droppedPath -or $loaded.WholeFile) { throw 'UI did not persist selection' }
     if ($loaded.RecognitionModel -ne 'PC_6001') { throw 'Recognition model not saved' }
+    if ($loaded.CorrectionModel -ne 'X1') { throw 'Correction profile not saved' }
     if ($loaded.MonitorVolumePercent -ne 37) { throw 'Monitor volume not saved' }
     if (!$loaded.AutoGain) { throw 'Automatic gain not saved' }
     if (!$loaded.InvertPhase) { throw 'Phase inversion not saved' }
@@ -90,6 +94,7 @@ try {
         if ($restoredFile.Text -ne $droppedPath -or $restoredWhole.Checked) { throw 'UI did not restore settings' }
         $restoredModel = $second.GetType().GetField('recognitionModel', $flags).GetValue($second)
         if ($restoredModel.Text -ne 'PC_6001') { throw 'Recognition model not restored' }
+        if ($second.GetType().GetField('correctionModel', $flags).GetValue($second).Text -ne 'X1') { throw 'Correction profile not restored' }
         $restoredVolume = $second.GetType().GetField('monitorVolumeSlider', $flags).GetValue($second)
         if ($restoredVolume.Value -ne 37) { throw 'Monitor volume not restored' }
         $restoredAuto = $second.GetType().GetField('autoGain', $flags).GetValue($second)
@@ -99,6 +104,7 @@ try {
     } finally { $second.Dispose() }
     $busyMethod = $form.GetType().GetMethod('SetBusy', $flags)
     $busyMethod.Invoke($form, @($true)) | Out-Null
+    if ($correction.Enabled -or $export.Enabled) { throw 'Correction/export controls remain enabled while busy' }
     $transport = $form.GetType().GetField('playOnly', $flags).GetValue($form)
     if ($transport.Enabled) { throw 'Transport enabled during preparation' }
     $pauseField = $form.GetType().GetField('pauseControl', $flags)

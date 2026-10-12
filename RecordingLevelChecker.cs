@@ -230,7 +230,8 @@ public sealed class PreparedAudio {
     public byte[] Pcm;
     public double GainDb, SourcePeakDb;
     public bool AutoGain, Silent, InvertPhase;
-    public string OutputDescription { get { return GainDescription+"\r\n位相反転: "+InvertPhase; } }
+    public string CorrectionModel=WaveformCorrection.None;
+    public string OutputDescription { get { return GainDescription+"\r\n位相反転: "+InvertPhase+"\r\n波形補正機種: "+CorrectionModel+"\r\n波形補正方式: "+WaveformCorrection.Version+"\r\n"+WaveformCorrection.Description(CorrectionModel); } }
     public string GainDescription {
         get { return !AutoGain?"手動ゲイン":Silent?"自動ゲイン：無音のため0 dB（増幅なし）":string.Format("自動ゲイン：元ピーク {0:F2} dBFS → 目標 −1 dBFS / 適用 {1:+0.0;-0.0;0.0} dB",SourcePeakDb,GainDb); }
     }
@@ -270,13 +271,19 @@ public static class DigitalGain {
     }
 }
 public static class Decoder {
-    public static PreparedAudio PrepareForPlayback(string path,double gain,int seconds,bool autoGain,CancellationToken token,bool invertPhase=false) {
-        return Prepare(path,1,gain,seconds,autoGain,false,token,invertPhase);
+    public static PreparedAudio PrepareForPlayback(string path,double gain,int seconds,bool autoGain,CancellationToken token,bool invertPhase=false,string correctionModel=WaveformCorrection.None) {
+        return Prepare(path,1,gain,seconds,autoGain,false,token,invertPhase,correctionModel);
     }
-    public static PreparedAudio Prepare(string path,double speed,double gain,int seconds,bool autoGain,bool keepPitch,CancellationToken token,bool invertPhase=false) {
-        if(!autoGain) { var manual=new PreparedAudio { Pcm=Decode(path,speed,gain,seconds,keepPitch,token),GainDb=gain,InvertPhase=invertPhase }; if(invertPhase) DigitalGain.InvertPolarity(manual.Pcm,token); return manual; }
+    public static PreparedAudio Prepare(string path,double speed,double gain,int seconds,bool autoGain,bool keepPitch,CancellationToken token,bool invertPhase=false,string correctionModel=WaveformCorrection.None) {
+        correctionModel=WaveformCorrection.Validate(correctionModel);
         if(seconds<0) throw new ArgumentOutOfRangeException("seconds");
-        var result=DigitalGain.Normalize(Decode(path,speed,0,0,keepPitch,token),token);
+        // Keep the legacy decode path bit-for-bit when no correction is applied.
+        bool corrected=WaveformCorrection.Supported(correctionModel);
+        var pcm=Decode(path,speed,autoGain || corrected?0:gain,autoGain?0:seconds,keepPitch,token);
+        WaveformCorrection.Apply(pcm,correctionModel,token);
+        if(!autoGain && corrected) WaveformCorrection.Gain(pcm,gain,token);
+        var result=autoGain?DigitalGain.Normalize(pcm,token):new PreparedAudio { Pcm=pcm,GainDb=gain };
+        result.CorrectionModel=correctionModel;
         // Even for a partial measurement, base the gain on the peak of the full file.
         if(seconds>0 && (long)seconds*192000<result.Pcm.Length) Array.Resize(ref result.Pcm,seconds*192000);
         result.InvertPhase=invertPhase;
@@ -387,6 +394,7 @@ public sealed class MainForm : Form {
     CheckBox wholeFile=new CheckBox(), autoGain=new CheckBox(), invertPhase=new CheckBox(); Label appliedGain=new Label(); bool loadingSettings=true;
     readonly string settingsPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"settings.xml");
     AppSettings preferences=new AppSettings();
+    ComboBox correctionModel=new ComboBox(); Label correctionDescription=new Label(); Button exportAudio=new Button();
     ComboBox recognitionModel=new ComboBox(); TextBox recognitionEngine=new TextBox(); Button chooseEngine=new Button(), inspectRecording=new Button(), playOnly=new Button();
     byte[] playbackPcm; ComparisonResult comparisonResult;
     CancellationTokenSource cancellation; CaptureResult result; string settings=""; bool busy;
@@ -459,7 +467,7 @@ public sealed class MainForm : Form {
         } catch(Exception ex) { status.Text=ex.Message; }
         RestoreSettings(); loadingSettings=false;
         foreach(var n in new NumericUpDown[] { speed,gain,duration,zoom }) n.ValueChanged+=delegate { PersistSettings(); };
-        foreach(var c in new ComboBox[] { input,output,monitorOutput,waveChannel,recognitionModel }) c.SelectedIndexChanged+=delegate { PersistSettings(); };
+        foreach(var c in new ComboBox[] { input,output,monitorOutput,waveChannel,recognitionModel,correctionModel }) c.SelectedIndexChanged+=delegate { PersistSettings(); };
         foreach(var c in new CheckBox[] { wholeFile,alignWaves,autoGain,invertPhase }) c.CheckedChanged+=delegate { PersistSettings(); };
         file.TextChanged+=delegate { PersistSettings(); };
         file.SelectedIndexChanged+=delegate {
@@ -471,8 +479,8 @@ public sealed class MainForm : Form {
         FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(busy) { cancellation.Cancel(); e.Cancel=true; status.Text="測定を停止しています。停止後に閉じてください。"; } else PersistSettings(); };
     }
     void OrganizeUi(TableLayoutPanel layout) {
-        layout.SuspendLayout(); layout.Controls.Clear(); layout.RowStyles.Clear(); layout.RowCount=7;
-        foreach(int height in new[]{46,48,48,46,50,42}) layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
+        layout.SuspendLayout(); layout.Controls.Clear(); layout.RowStyles.Clear(); layout.RowCount=8;
+        foreach(int height in new[]{46,48,48,46,58,50,42}) layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         layout.Controls.Add(new Label { Text="PGA-TapeStudio",Font=new Font(Font.FontFamily,21,FontStyle.Bold),AutoSize=true });
         file.Width=760; browse.Text="WAV・音声を選択";
@@ -481,10 +489,17 @@ public sealed class MainForm : Form {
         layout.Controls.Add(Row(Label("再生出力",80),output,Label("モニター出力",110),monitorOutput));
         appliedGain.Width=135;
         layout.Controls.Add(Row(autoGain,appliedGain,Label("出力ゲイン（手動）",145),gain,Label("dB",32),invertPhase));
+        correctionModel.DropDownStyle=ComboBoxStyle.DropDownList; correctionModel.Width=165;
+        correctionModel.Items.Add(WaveformCorrection.None); correctionModel.Items.AddRange(TapeRecognition.Models); correctionModel.SelectedIndex=0;
+        correctionDescription.AutoSize=false; correctionDescription.Width=420; correctionDescription.Height=46;
+        correctionDescription.Text=WaveformCorrection.Description(WaveformCorrection.None);
+        correctionModel.SelectedIndexChanged+=delegate { correctionDescription.Text=WaveformCorrection.Description(correctionModel.Text); };
+        exportAudio.Text="補正WAV保存"; exportAudio.Width=135; exportAudio.Click+=ExportAudio;
+        layout.Controls.Add(Row(Label("波形補正機種",110),correctionModel,correctionDescription,exportAudio));
         playOnly.Text="▶ 再生（100%）"; playOnly.Width=165;
         playOnly.BackColor=Color.FromArgb(33,93,159); playOnly.ForeColor=Color.White; playOnly.FlatStyle=FlatStyle.Flat;
         start.Text="再生＋録音測定"; start.Width=155;
-        foreach(var button in new[]{playOnly,start,stop,save,inspectRecording,browse,chooseEngine,peakButton}) button.Height=32;
+        foreach(var button in new[]{playOnly,start,stop,save,inspectRecording,browse,chooseEngine,peakButton,exportAudio}) button.Height=32;
         monitorVolumeSlider.Width=135;
         layout.Controls.Add(Row(playOnly,stop,start,Label("モニター音量",110),monitorVolumeSlider,monitorVolumeLabel));
         status.Font=new Font(Font.FontFamily,10); status.ForeColor=Color.FromArgb(55,72,93);
@@ -528,6 +543,7 @@ public sealed class MainForm : Form {
             wholeFile.Checked=preferences.WholeFile; alignWaves.Checked=preferences.AlignWaves;
             autoGain.Checked=preferences.AutoGain; invertPhase.Checked=preferences.InvertPhase;
             waveChannel.SelectedIndex=preferences.WaveChannel;
+            correctionModel.SelectedIndex=Math.Max(0,correctionModel.Items.IndexOf(preferences.CorrectionModel));
             recognitionModel.SelectedIndex=Math.Max(0,Array.IndexOf(TapeRecognition.Models,preferences.RecognitionModel)+1);
             recognitionEngine.Text=preferences.RecognitionEngine;
             if(string.IsNullOrEmpty(recognitionEngine.Text)) {
@@ -546,7 +562,7 @@ public sealed class MainForm : Form {
         if(monitorOutput.SelectedIndex>=0) { preferences.MonitorEnabled=monitorOutput.SelectedIndex>0; preferences.MonitorName=preferences.MonitorEnabled?monitorOutput.Text:""; }
         preferences.LastFile=file.Text; preferences.Speed=speed.Value; preferences.Gain=gain.Value; preferences.Seconds=duration.Value;
         preferences.Zoom=zoom.Value; preferences.WholeFile=wholeFile.Checked;
-        preferences.AutoGain=autoGain.Checked; preferences.InvertPhase=invertPhase.Checked;
+        preferences.CorrectionModel=correctionModel.Text; preferences.AutoGain=autoGain.Checked; preferences.InvertPhase=invertPhase.Checked;
         preferences.AlignWaves=alignWaves.Checked; preferences.WaveChannel=waveChannel.SelectedIndex;
         preferences.RecognitionEngine=recognitionEngine.Text; preferences.RecognitionModel=recognitionModel.SelectedIndex>0?recognitionModel.Text:"";
         preferences.MonitorVolumePercent=monitorVolumeSlider.Value;
@@ -590,7 +606,7 @@ public sealed class MainForm : Form {
     }
     void Browse(object sender,EventArgs e) { using(var d=new OpenFileDialog { Filter="音声ファイル|*.wav;*.mp3;*.flac;*.m4a;*.aac;*.ogg;*.wma;*.aiff;*.opus|すべてのファイル|*.*" }) if(d.ShowDialog()==DialogResult.OK) file.Text=d.FileName; }
     void SetBusy(bool value) {
-        file.Enabled=!value;
+        file.Enabled=correctionModel.Enabled=exportAudio.Enabled=!value;
         busy=value; playOnly.Enabled=start.Enabled=browse.Enabled=input.Enabled=output.Enabled=monitorOutput.Enabled=speed.Enabled=gain.Enabled=wholeFile.Enabled=!value;
         autoGain.Enabled=invertPhase.Enabled=!value; gain.Enabled=!value && !autoGain.Checked;
         RefreshTransport();
@@ -614,13 +630,13 @@ public sealed class MainForm : Form {
         if(!File.Exists(file.Text) || output.SelectedIndex<0 || monitorOutput.SelectedIndex<0) { MessageBox.Show(this,"音源と再生出力を選んでください。モニター不要の場合は「なし」を選びます。"); return; }
         uint outId=(uint)output.SelectedIndex; int monitorId=monitorOutput.SelectedIndex-1;
         try { AudioEngine.ValidateOutputs(outId,monitorId); } catch(Exception ex) { MessageBox.Show(this,ex.Message); return; }
-        string path=file.Text; double level=(double)gain.Value; int seconds=wholeFile.Checked?0:(int)duration.Value; bool automatic=autoGain.Checked, inverted=invertPhase.Checked;
+        string profile=correctionModel.Text; string path=file.Text; double level=(double)gain.Value; int seconds=wholeFile.Checked?0:(int)duration.Value; bool automatic=autoGain.Checked, inverted=invertPhase.Checked;
         SetBusy(true); cancellation=new CancellationTokenSource(); result=null; comparisonResult=null; playbackPcm=null;
         wave.Samples=null; alignWaves.Enabled=false; meter.Value=0; UpdateWaves();
         numbers.Text="再生のみ：100%（1倍速）固定 / 録音・レベル測定なし"; comparison.Text="再生のみでは録音・波形比較・認識検査は行いません。測定速度の設定にかかわらず100%で再生します。";
         try {
             status.Text="再生用の音声を準備しています…";
-            var prepared=await Task.Run(()=>Decoder.PrepareForPlayback(path,level,seconds,automatic,cancellation.Token,inverted));
+            var prepared=await Task.Run(()=>Decoder.PrepareForPlayback(path,level,seconds,automatic,cancellation.Token,inverted,profile));
             RecordAudioUse(path);
             byte[] pcm=prepared.Pcm; appliedGain.Text=automatic?prepared.GainDb.ToString("+0.0;-0.0;0.0")+" dB":"";
             comparison.Text+= "\r\n"+prepared.OutputDescription;
@@ -642,13 +658,13 @@ public sealed class MainForm : Form {
         SetBusy(true); cancellation=new CancellationTokenSource(); result=null; wave.Samples=null; wave.Invalidate(); meter.Value=0;
         playbackPcm=null; comparisonResult=null; alignWaves.Enabled=false; UpdateWaves();
         comparison.Text="比較はまだ実行していません。";
-        string path=file.Text; double rate=(double)speed.Value, level=(double)gain.Value; int seconds=wholeFile.Checked?0:(int)duration.Value; bool keep=false, automatic=autoGain.Checked, inverted=invertPhase.Checked;
+        string profile=correctionModel.Text; string path=file.Text; double rate=(double)speed.Value, level=(double)gain.Value; int seconds=wholeFile.Checked?0:(int)duration.Value; bool keep=false, automatic=autoGain.Checked, inverted=invertPhase.Checked;
         uint inId=(uint)input.SelectedIndex, outId=(uint)output.SelectedIndex;
         settings="日時: "+DateTime.Now.ToString("O")+"\r\n音源: "+path+"\r\n入力: "+input.Text+"\r\n出力: "+output.Text+"\r\n速度: "+rate+" 倍\r\n出力ゲイン: "+level+" dB\r\n測定上限: "+(seconds==0?"全部":seconds+" 秒")+"\r\n音程維持: "+keep+"\r\n";
         settings+="モニター出力: "+monitorOutput.Text+"\r\n";
         try {
             status.Text="音声を準備しています…";
-            var prepared=await Task.Run(()=>Decoder.Prepare(path,rate,level,seconds,automatic,keep,cancellation.Token,inverted));
+            var prepared=await Task.Run(()=>Decoder.Prepare(path,rate,level,seconds,automatic,keep,cancellation.Token,inverted,profile));
             RecordAudioUse(path);
             byte[] pcm=prepared.Pcm;
             settings=settings.Replace("出力ゲイン: "+level+" dB","出力ゲイン: "+prepared.GainDb.ToString(CultureInfo.InvariantCulture)+" dB");
@@ -694,16 +710,16 @@ public sealed class MainForm : Form {
         if(!File.Exists(file.Text) || recognitionModel.SelectedIndex<=0 || !File.Exists(recognitionEngine.Text)) { MessageBox.Show(this,"元音源・認識機種・DumpListEditor.exeを選択してください。録音の付属ログがない場合は速度・出力ゲイン・測定範囲を録音時に合わせてください。"); return; }
         string recorded;
         using(var d=new OpenFileDialog { Title="検査する録音WAVを選択", Filter="録音WAV|*.wav" }) { if(d.ShowDialog()!=DialogResult.OK) return; recorded=d.FileName; }
-        string source=file.Text,engine=recognitionEngine.Text,model=recognitionModel.Text; double rate=(double)speed.Value,level=(double)gain.Value; bool keep=false,all=wholeFile.Checked,automatic=autoGain.Checked,inverted=invertPhase.Checked; int seconds=all?0:(int)duration.Value,channel=waveChannel.SelectedIndex;
+        string profile=correctionModel.Text; string source=file.Text,engine=recognitionEngine.Text,model=recognitionModel.Text; double rate=(double)speed.Value,level=(double)gain.Value; bool keep=false,all=wholeFile.Checked,automatic=autoGain.Checked,inverted=invertPhase.Checked; int seconds=all?0:(int)duration.Value,channel=waveChannel.SelectedIndex;
         if(File.Exists(recorded+".txt")) {
-            try { TapeRecognition.ReadRecordedSettings(recorded+".txt",ref rate,ref level,ref keep,ref seconds); all=seconds==0; automatic=File.ReadAllText(recorded+".txt").Contains("自動ゲイン: True"); inverted=TapeRecognition.ReadPhaseInversion(recorded+".txt"); }
+            try { TapeRecognition.ReadRecordedSettings(recorded+".txt",ref rate,ref level,ref keep,ref seconds); all=seconds==0; automatic=File.ReadAllText(recorded+".txt").Contains("自動ゲイン: True"); inverted=TapeRecognition.ReadPhaseInversion(recorded+".txt"); profile=WaveformCorrection.ReadLog(recorded+".txt"); }
             catch(Exception ex) { MessageBox.Show(this,"録音ログの条件を読み込めません："+ex.Message); return; }
         }
         SetBusy(true); cancellation=new CancellationTokenSource();
         try {
             status.Text="保存WAVの認識検査中…";
             string report=await Task.Run(()=> {
-                var prepared=Decoder.Prepare(source,rate,level,seconds,automatic,keep,cancellation.Token,inverted); var pcm=prepared.Pcm;
+                var prepared=Decoder.Prepare(source,rate,level,seconds,automatic,keep,cancellation.Token,inverted,profile); var pcm=prepared.Pcm;
                 var audio=WaveView.ExtractPlayback(Decoder.Decode(recorded,1,0,0,false,cancellation.Token),0);
                 return "元音源: "+source+"\r\n録音: "+recorded+"\r\n速度: "+rate+" / 音程維持: "+keep+"\r\n"+prepared.OutputDescription+"\r\n"+TapeRecognition.Check(source,pcm,audio,engine,model,rate,keep,channel,all,cancellation.Token);
             });
@@ -717,6 +733,37 @@ public sealed class MainForm : Form {
         } catch(OperationCanceledException) { status.Text="認識検査を中断しました。"; }
         catch(Exception ex) { status.Text="認識検査できませんでした。"; MessageBox.Show(this,ex.Message); }
         finally { cancellation.Dispose(); cancellation=null; SetBusy(false); }
+    }
+    async void ExportAudio(object sender,EventArgs e) {
+        if(!File.Exists(file.Text)) { MessageBox.Show(this,"元音源を選んでください。"); return; }
+        string source=Path.GetFullPath(file.Text),destination;
+        using(var dialog=new SaveFileDialog { Title="補正後の全体を100%で保存（48 kHz / 16 bit / ステレオ）",Filter="WAV|*.wav",DefaultExt="wav",AddExtension=true,FileName=Path.GetFileNameWithoutExtension(source)+"-corrected.wav" }) {
+            if(dialog.ShowDialog()!=DialogResult.OK) return; destination=Path.GetFullPath(dialog.FileName);
+        }
+        if(string.Equals(source,destination,StringComparison.OrdinalIgnoreCase) || string.Equals(source,destination+".txt",StringComparison.OrdinalIgnoreCase)) { MessageBox.Show(this,"元音源とは別のファイル名を指定してください。"); return; }
+        if(File.Exists(destination+".txt") && MessageBox.Show(this,"付属ログも上書きしますか？\r\n"+destination+".txt","上書き確認",MessageBoxButtons.YesNo)!=DialogResult.Yes) return;
+        string profile=correctionModel.Text; double level=(double)gain.Value; bool automatic=autoGain.Checked,inverted=invertPhase.Checked;
+        SetBusy(true); cancellation=new CancellationTokenSource();
+        string temporary=destination+"."+Guid.NewGuid().ToString("N")+".tmp";
+        try {
+            status.Text="補正WAVを準備しています（全体・100%）…";
+            var prepared=await Task.Run(()=>Decoder.PrepareForPlayback(source,level,0,automatic,cancellation.Token,inverted,profile));
+            string log="補正WAVエクスポート（録音ではありません）\r\n日時: "+DateTime.Now.ToString("O")+"\r\n音源: "+source+"\r\n速度: 1 倍\r\n測定上限: 全部\r\n出力ゲイン: "+prepared.GainDb.ToString(CultureInfo.InvariantCulture)+" dB\r\n自動ゲイン: "+automatic+"\r\n"+prepared.OutputDescription+"\r\n形式: PCM 48000 Hz / 16 bit / stereo\r\n";
+            await Task.Run(()=> { WaveformCorrection.SaveWave(temporary,prepared.Pcm); File.WriteAllText(temporary+".txt",log,new UTF8Encoding(true)); cancellation.Token.ThrowIfCancellationRequested(); });
+            if(File.Exists(destination)) File.Replace(temporary,destination,null); else File.Move(temporary,destination);
+            if(File.Exists(destination+".txt")) File.Replace(temporary+".txt",destination+".txt",null); else File.Move(temporary+".txt",destination+".txt");
+            RecordAudioUse(source);
+            comparison.Text=log+"\r\n保存先: "+destination+"\r\n認識・実機ロードの成否は未検査です。";
+            playbackPcm=prepared.Pcm; result=null; comparisonResult=null; wave.Samples=null; alignWaves.Enabled=false;
+            position.Maximum=Math.Max(130,(decimal)playbackPcm.Length/192000+10); position.Value=0; UpdateWaves();
+            appliedGain.Text=automatic?prepared.GainDb.ToString("+0.0;-0.0;0.0")+" dB":"";
+            status.Text="補正WAVと設定ログを保存しました："+destination;
+        } catch(OperationCanceledException) { status.Text="書き出しを中断しました。"; }
+        catch(Exception ex) { status.Text="書き出しに失敗しました。"; MessageBox.Show(this,ex.Message); }
+        finally {
+            foreach(string path in new[]{temporary,temporary+".txt"}) { try { if(File.Exists(path)) File.Delete(path); } catch(IOException) { } }
+            cancellation.Dispose(); cancellation=null; SetBusy(false);
+        }
     }
     void Save(object sender,EventArgs e) {
         using(var d=new SaveFileDialog { Filter="録音 WAV|*.wav", FileName="mic-check-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".wav" }) {

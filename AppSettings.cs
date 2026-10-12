@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Xml;
@@ -23,6 +23,7 @@ public sealed class AppSettings {
     public bool MonitorEnabled;
     public bool AutoGain;
     public bool InvertPhase;
+    public string CorrectionModel=WaveformCorrection.None;
     public int MonitorVolumePercent=100;
     public string RecognitionModel="", RecognitionEngine="";
     public decimal Speed=2, Gain=-18, Seconds=15, Zoom=50;

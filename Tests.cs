@@ -16,6 +16,39 @@ public static class Tests {
         var recording=new short[source.Length+lag+24000]; for(int i=0;i<source.Length;i++) recording[i+lag]=(short)(source[i]*gain); return recording;
     }
     public static void Main() {
+        var pulse=Stereo(new short[]{0,100,1000,300,-200,-800,-100,0,1,2,0,short.MinValue});
+        var untouched=(byte[])pulse.Clone(); WaveformCorrection.Apply(untouched,WaveformCorrection.None,CancellationToken.None);
+        Check(Convert.ToBase64String(pulse)==Convert.ToBase64String(untouched),"no correction is bit exact");
+        WaveformCorrection.Apply(untouched,"PC_6001",CancellationToken.None);
+        Check(Convert.ToBase64String(pulse)==Convert.ToBase64String(untouched),"unverified profiles do not alter PCM");
+        foreach(string profile in TapeRecognition.Models) {
+            var shaped=(byte[])pulse.Clone(); WaveformCorrection.Apply(shaped,profile,CancellationToken.None);
+            for(int i=0;i<shaped.Length;i+=2) if(Math.Sign(BitConverter.ToInt16(shaped,i))!=Math.Sign(BitConverter.ToInt16(pulse,i))) throw new Exception("changed transition: "+profile);
+        }
+        Check(true,"all profiles preserve sampled sign transitions and silence");
+        WaveformCorrection.Apply(pulse,"X1",CancellationToken.None);
+        Check(BitConverter.ToInt16(pulse,4)==1000 && BitConverter.ToInt16(pulse,16)==-800 && BitConverter.ToInt16(pulse,32)==2 && BitConverter.ToInt16(pulse,44)==short.MinValue,"shaping uses local peaks without overflow or global noise amplification");
+        var correctionCancel=new CancellationTokenSource(); correctionCancel.Cancel(); bool correctionStopped=false;
+        try { WaveformCorrection.Apply(pulse,"X1",correctionCancel.Token); } catch(OperationCanceledException) { correctionStopped=true; }
+        Check(correctionStopped,"waveform correction is cancellable");
+        string exported=Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".wav");
+        try {
+            WaveformCorrection.SaveWave(exported,pulse); var bytes=File.ReadAllBytes(exported);
+            Check(bytes.Length==pulse.Length+44 && BitConverter.ToInt16(bytes,22)==2 && BitConverter.ToInt32(bytes,24)==48000 && BitConverter.ToInt32(bytes,40)==pulse.Length,"export WAV has stereo PCM header and correct length");
+            var payload=new byte[pulse.Length]; Array.Copy(bytes,44,payload,0,payload.Length);
+            Check(Convert.ToBase64String(payload)==Convert.ToBase64String(pulse),"export retains both channels exactly");
+            File.WriteAllText(exported+".txt","legacy log"); Check(WaveformCorrection.ReadLog(exported+".txt")==WaveformCorrection.None,"legacy log defaults to no correction");
+            File.WriteAllText(exported+".txt","波形補正機種: X1\r\n波形補正方式: logic-v1"); Check(WaveformCorrection.ReadLog(exported+".txt")=="X1","correction log restores model and algorithm version");
+            File.WriteAllText(exported+".txt","波形補正機種: X1\r\n波形補正方式: future"); bool refused=false;
+            try { WaveformCorrection.ReadLog(exported+".txt"); } catch(InvalidDataException) { refused=true; }
+            Check(refused,"unknown algorithm version cannot silently reproduce a recording");
+            var corrected=Decoder.PrepareForPlayback(exported,-6,0,false,CancellationToken.None,false,"X1");
+            var expected=(byte[])pulse.Clone(); WaveformCorrection.Apply(expected,"X1",CancellationToken.None); WaveformCorrection.Gain(expected,-6,CancellationToken.None);
+            Check(Convert.ToBase64String(expected)==Convert.ToBase64String(corrected.Pcm),"playback and export pipeline applies correction before manual gain");
+            var autoCorrected=Decoder.PrepareForPlayback(exported,0,0,true,CancellationToken.None,true,"X1");
+            var expectedAuto=DigitalGain.Normalize((byte[])pulse.Clone(),CancellationToken.None); DigitalGain.InvertPolarity(expectedAuto.Pcm,CancellationToken.None);
+            Check(Convert.ToBase64String(expectedAuto.Pcm)==Convert.ToBase64String(autoCorrected.Pcm),"auto gain and phase inversion follow correction");
+        } finally { File.Delete(exported); File.Delete(exported+".txt"); }
         var history=new AppSettings(); history.RememberAudio(@"C:\audio\one.wav"); history.RememberAudio(@"C:\audio\two.wav"); history.RememberAudio(@"C:\AUDIO\ONE.wav");
         Check(history.AudioHistory.Count==2 && history.AudioHistory[0].Uses==2 && history.AudioHistory[0].LastUsedUtc.Length>0,"audio history deduplicates paths and records use time and count");
         for(int i=0;i<110;i++) history.RememberAudio(@"C:\audio\"+i+".wav");
