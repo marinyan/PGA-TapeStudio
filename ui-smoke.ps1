@@ -99,6 +99,21 @@ try {
     } finally { $second.Dispose() }
     $busyMethod = $form.GetType().GetMethod('SetBusy', $flags)
     $busyMethod.Invoke($form, @($true)) | Out-Null
+    $transport = $form.GetType().GetField('playOnly', $flags).GetValue($form)
+    if ($transport.Enabled) { throw 'Transport enabled during preparation' }
+    $pauseField = $form.GetType().GetField('pauseControl', $flags)
+    $pauseState = New-Object RecordingLevelChecker.MeasurementPause
+    $pauseField.SetValue($form, $pauseState)
+    $refreshTransport = $form.GetType().GetMethod('RefreshTransport', $flags)
+    $refreshTransport.Invoke($form, @()) | Out-Null
+    if (!$transport.Enabled -or !$transport.Text.Contains('一時停止')) { throw 'Transport did not become pause' }
+    $transport.PerformClick()
+    if (!$pauseState.Requested -or !$transport.Text.Contains('再開')) { throw 'Transport did not become resume' }
+    $transport.PerformClick()
+    if ($pauseState.Requested -or !$transport.Text.Contains('一時停止')) { throw 'Transport did not resume' }
+    $pauseField.SetValue($form, $null)
+    $refreshTransport.Invoke($form, @()) | Out-Null
+    if ($transport.Enabled) { throw 'Transport enabled during analysis' }
     $beforeWheel = $picker.Text
     $picker.CycleHistory(-120)
     if ($picker.Enabled -or $picker.Text -ne $beforeWheel) { throw 'Busy history selection changed' }
@@ -111,6 +126,7 @@ try {
     $enter.Invoke($form, @($drag.PSObject.BaseObject)) | Out-Null
     if ($drag.Effect -ne [System.Windows.Forms.DragDropEffects]::None) { throw 'Busy UI accepted a drop' }
     $busyMethod.Invoke($form, @($false)) | Out-Null
+    if (!$transport.Enabled -or !$transport.Text.Contains('再生')) { throw 'Idle transport not restored' }
     if ($manualGain.Enabled) { throw 'Automatic mode did not keep manual gain disabled' }
     $autoGain.Checked = $false
     if (!$manualGain.Enabled) { throw 'Manual gain not restored after auto mode' }

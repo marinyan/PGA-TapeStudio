@@ -377,7 +377,7 @@ public sealed class AudioFilePicker : ComboBox {
 }
 public sealed class MainForm : Form {
     ComboBox input=new ComboBox(), output=new ComboBox(), monitorOutput=new ComboBox();
-    Button pauseButton=new Button(); MeasurementPause pauseControl;
+    MeasurementPause pauseControl;
     TrackBar monitorVolumeSlider=new TrackBar(); Label monitorVolumeLabel=new Label(); MonitorVolume monitorLevel=new MonitorVolume();
     AudioFilePicker file=new AudioFilePicker(); NumericUpDown speed=new NumericUpDown(), gain=new NumericUpDown(), duration=new NumericUpDown(), zoom=new NumericUpDown(), position=new NumericUpDown();
     Button browse=new Button(), start=new Button(), stop=new Button(), save=new Button(), peakButton=new Button();
@@ -425,17 +425,10 @@ public sealed class MainForm : Form {
         autoGain.CheckedChanged+=delegate { gain.Enabled=!busy && !autoGain.Checked; appliedGain.Text=autoGain.Checked?"再生前に全体解析":""; };
         layout.Controls.Add(Row(Label("測定速度",72),speed,Label("倍  出力",72),gain,Label("dB  測定",78),duration,Label("秒",28),wholeFile,autoGain,appliedGain));
         start.Text="再生して測定"; start.Width=160; stop.Text="■ 停止"; stop.Enabled=false; save.Text="WAV・結果を保存"; save.Width=165; save.Enabled=false;
-        start.Click+=Start; stop.Click+=delegate { if(cancellation!=null) cancellation.Cancel(); }; save.Click+=Save;
-        pauseButton.Text="⏸ 一時停止"; pauseButton.Width=110; pauseButton.Enabled=false;
-        pauseButton.Click+=delegate {
-            if(pauseControl==null) return;
-            pauseControl.Requested=!pauseControl.Requested;
-            pauseButton.Text=pauseControl.Requested?"▶ 再開":"⏸ 一時停止";
-            status.Text=pauseControl.Requested?"一時停止を要求しています…":"再開を要求しています…";
-        };
+        start.Click+=Start; stop.Click+=delegate { if(cancellation!=null) cancellation.Cancel(); RefreshTransport(); }; save.Click+=Save;
         inspectRecording.Text="保存WAVを認識検査"; inspectRecording.Width=185; inspectRecording.Click+=InspectRecording;
-        playOnly.Text="再生のみ（1倍）"; playOnly.Width=140; playOnly.Click+=PlayOnly;
-        layout.Controls.Add(Row(playOnly,start,pauseButton,stop,save,inspectRecording));
+        playOnly.Text="再生のみ（1倍）"; playOnly.Width=140; playOnly.Click+=PlayOrPause;
+        layout.Controls.Add(Row(playOnly,start,stop,save,inspectRecording));
         recognitionModel.DropDownStyle=ComboBoxStyle.DropDownList; recognitionModel.Width=170; recognitionModel.Items.Add("認識検査なし"); recognitionModel.Items.AddRange(TapeRecognition.Models); recognitionModel.SelectedIndex=0;
         recognitionEngine.Width=470; recognitionEngine.ReadOnly=true; chooseEngine.Text="エンジン選択"; chooseEngine.Width=115;
         chooseEngine.Click+=delegate { using(var d=new OpenFileDialog { Filter="DumpListEditor|DumpListEditor.exe" }) if(d.ShowDialog()==DialogResult.OK) recognitionEngine.Text=d.FileName; };
@@ -491,9 +484,9 @@ public sealed class MainForm : Form {
         playOnly.Text="▶ 再生（100%）"; playOnly.Width=165;
         playOnly.BackColor=Color.FromArgb(33,93,159); playOnly.ForeColor=Color.White; playOnly.FlatStyle=FlatStyle.Flat;
         start.Text="再生＋録音測定"; start.Width=155;
-        foreach(var button in new[]{playOnly,start,pauseButton,stop,save,inspectRecording,browse,chooseEngine,peakButton}) button.Height=32;
+        foreach(var button in new[]{playOnly,start,stop,save,inspectRecording,browse,chooseEngine,peakButton}) button.Height=32;
         monitorVolumeSlider.Width=135;
-        layout.Controls.Add(Row(playOnly,pauseButton,stop,start,Label("モニター音量",110),monitorVolumeSlider,monitorVolumeLabel));
+        layout.Controls.Add(Row(playOnly,stop,start,Label("モニター音量",110),monitorVolumeSlider,monitorVolumeLabel));
         status.Font=new Font(Font.FontFamily,10); status.ForeColor=Color.FromArgb(55,72,93);
         layout.Controls.Add(status);
         var tabs=new TabControl { Dock=DockStyle.Fill,Name="workspaceTabs" };
@@ -600,10 +593,22 @@ public sealed class MainForm : Form {
         file.Enabled=!value;
         busy=value; playOnly.Enabled=start.Enabled=browse.Enabled=input.Enabled=output.Enabled=monitorOutput.Enabled=speed.Enabled=gain.Enabled=wholeFile.Enabled=!value;
         autoGain.Enabled=invertPhase.Enabled=!value; gain.Enabled=!value && !autoGain.Checked;
-        if(!value) { pauseButton.Enabled=false; pauseButton.Text="⏸ 一時停止"; }
+        RefreshTransport();
         duration.Enabled=!value && !wholeFile.Checked;
         recognitionModel.Enabled=recognitionEngine.Enabled=chooseEngine.Enabled=inspectRecording.Enabled=!value;
         stop.Enabled=value; save.Enabled=!value && result!=null;
+    }
+    void RefreshTransport() {
+        bool active=busy && pauseControl!=null && (cancellation==null || !cancellation.IsCancellationRequested);
+        playOnly.Enabled=!busy || active;
+        playOnly.Text=!busy?"▶ 再生（100%）":active?(pauseControl.Requested?"▶ 再開":"⏸ 一時停止"):"処理中…";
+    }
+    void PlayOrPause(object sender,EventArgs e) {
+        if(!busy) { PlayOnly(sender,e); return; }
+        if(pauseControl==null || (cancellation!=null && cancellation.IsCancellationRequested)) return;
+        pauseControl.Requested=!pauseControl.Requested;
+        RefreshTransport();
+        status.Text=pauseControl.Requested?"一時停止を要求しています…":"再開を要求しています…";
     }
     async void PlayOnly(object sender,EventArgs e) {
         if(!File.Exists(file.Text) || output.SelectedIndex<0 || monitorOutput.SelectedIndex<0) { MessageBox.Show(this,"音源と再生出力を選んでください。モニター不要の場合は「なし」を選びます。"); return; }
@@ -620,7 +625,7 @@ public sealed class MainForm : Form {
             byte[] pcm=prepared.Pcm; appliedGain.Text=automatic?prepared.GainDb.ToString("+0.0;-0.0;0.0")+" dB":"";
             comparison.Text+= "\r\n"+prepared.OutputDescription;
             playbackPcm=pcm; position.Maximum=Math.Max(130,(decimal)pcm.Length/192000+10); position.Value=0; UpdateWaves();
-            pauseControl=new MeasurementPause(); pauseButton.Enabled=true;
+            pauseControl=new MeasurementPause(); RefreshTransport();
             var played=await Task.Run(()=>AudioEngine.Run(pcm,0,outId,cancellation.Token,(a,t)=> {
                 BeginInvoke((Action)(()=> { status.Text=string.Format("{0} {1:F1} / {2:F1} 秒",pauseControl!=null && pauseControl.IsPaused?"一時停止中":"再生中",t,pcm.Length/192000.0); position.Value=Math.Min(position.Maximum,(decimal)t); }));
             },monitorId,pauseControl,false,monitorLevel));
@@ -652,12 +657,12 @@ public sealed class MainForm : Form {
             position.Maximum=Math.Max(130,(decimal)pcm.Length/192000+10);
             playbackPcm=pcm; UpdateWaves();
             status.Text="録音・倍速再生中…";
-            pauseControl=new MeasurementPause(); pauseButton.Enabled=true;
+            pauseControl=new MeasurementPause(); RefreshTransport();
             result=await Task.Run(()=>AudioEngine.Run(pcm,inId,outId,cancellation.Token,(a,t)=> {
                 string text=Metrics(a); int value=(int)Math.Max(0,Math.Min(600,(a.PeakDb+60)*10));
                 BeginInvoke((Action)(()=> { numbers.Text=text; meter.Value=value; status.Text=string.Format("{0} {1:F1} / 約{2:F1} 秒  /  {3}",pauseControl!=null && pauseControl.IsPaused?"一時停止中":"測定中",t,pcm.Length/192000.0+0.8,a.Verdict); }));
             },monitorId,pauseControl,true,monitorLevel));
-            pauseButton.Enabled=false;
+            pauseControl=null; RefreshTransport();
             settings+="一時停止回数: "+result.PauseCount+"\r\n";
             wave.Samples=result.Audio; position.Value=Math.Min(position.Maximum,(decimal)result.Stats.PeakIndex/48000); wave.Center=result.Stats.PeakIndex; wave.Invalidate();
             status.Text="再生データと録音を比較しています…";
