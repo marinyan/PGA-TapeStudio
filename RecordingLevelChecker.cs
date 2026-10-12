@@ -231,7 +231,7 @@ public sealed class PreparedAudio {
     public double GainDb, SourcePeakDb;
     public bool AutoGain, Silent, InvertPhase;
     public string CorrectionModel=WaveformCorrection.None;
-    public string OutputDescription { get { return GainDescription+"\r\n位相反転: "+InvertPhase+"\r\n波形補正機種: "+CorrectionModel+"\r\n波形補正方式: "+WaveformCorrection.Version+"\r\n"+WaveformCorrection.Description(CorrectionModel); } }
+    public string OutputDescription { get { return GainDescription+"\r\n位相反転: "+InvertPhase+"\r\n波形補正機種: "+CorrectionModel+"\r\n波形補正方式: "+WaveformCorrection.VersionFor(CorrectionModel)+"\r\n"+WaveformCorrection.Description(CorrectionModel); } }
     public string GainDescription {
         get { return !AutoGain?"手動ゲイン":Silent?"自動ゲイン：無音のため0 dB（増幅なし）":string.Format("自動ゲイン：元ピーク {0:F2} dBFS → 目標 −1 dBFS / 適用 {1:+0.0;-0.0;0.0} dB",SourcePeakDb,GainDb); }
     }

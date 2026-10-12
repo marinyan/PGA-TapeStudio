@@ -15,17 +15,61 @@ public static class Tests {
     static short[] Capture(short[] source,int lag,double gain) {
         var recording=new short[source.Length+lag+24000]; for(int i=0;i<source.Length;i++) recording[i+lag]=(short)(source[i]*gain); return recording;
     }
+    static double Fundamental(byte[] pcm,int hz) {
+        double re=0,im=0;
+        for(int i=24000;i<48000;i++) { double phase=2*Math.PI*hz*i/48000; re+=BitConverter.ToInt16(pcm,i*4)*Math.Cos(phase); im+=BitConverter.ToInt16(pcm,i*4)*Math.Sin(phase); }
+        return Math.Sqrt(re*re+im*im);
+    }
+    static double CircuitMagnitude(string model,int hz) {
+        double r=model=="MSX"?4700:model.StartsWith("PC_88")?560:2200;
+        double load=model=="MSX"?4800:model.StartsWith("PC_88")?5133:12100;
+        double c=model=="MSX"?22e-9:model.StartsWith("PC_88")?100e-9:47e-9;
+        double coupling=model=="MSX"?1e-6:model.StartsWith("PC_88")?0:100e-9;
+        double omega=96000*Math.Tan(Math.PI*hz/48000),q=omega*c*load;
+        double zr=load/(1+q*q),zi=-load*q/(1+q*q),si=coupling==0?0:-1/(omega*coupling);
+        return Math.Sqrt((zr*zr+zi*zi)/((r+zr)*(r+zr)+(si+zi)*(si+zi)))*(r+load)/load;
+    }
+    static void CircuitTests() {
+        foreach(string model in new[]{"PC_6001","PC_6601SR","PC_8801","PC_8801mkIISR","MSX"}) {
+            Check(WaveformCorrection.Supported(model),model+" is enabled");
+            var silence=new byte[8000]; WaveformCorrection.Apply(silence,model,CancellationToken.None);
+            Check(Array.TrueForAll(silence,b=>b==0),model+" keeps digital silence");
+            foreach(int hz in new[]{600,1200,2400,4800}) {
+                var square=new short[48000]; int period=48000/hz;
+                for(int i=0;i<square.Length;i++) square[i]=(short)(i%period<period/2?10000:-10000);
+                var original=Stereo(square); var filtered=(byte[])original.Clone();
+                // Right channel is silent; filter memory must not leak across channels.
+                for(int i=2;i<filtered.Length;i+=4) { filtered[i]=0; filtered[i+1]=0; }
+                WaveformCorrection.Apply(filtered,model,CancellationToken.None);
+                // Independent frequency-domain impedance calculation, including the divider load.
+                double expected=CircuitMagnitude(model,hz),measured=Fundamental(filtered,hz)/Fundamental(original,hz);
+                Check(measured<=expected+0.002 && measured>expected*0.5,model+" "+hz+" Hz level respects linked peak protection");
+                double relative=Fundamental(filtered,hz*3)/Fundamental(filtered,hz);
+                double target=Fundamental(original,hz*3)/Fundamental(original,hz)*CircuitMagnitude(model,hz*3)/expected;
+                Check(Math.Abs(relative-target)<0.002,model+" "+hz+" Hz harmonic response matches loaded circuit");
+                bool isolated=true; for(int i=2;i<filtered.Length;i+=4) isolated &= BitConverter.ToInt16(filtered,i)==0;
+                Check(isolated,model+" "+hz+" Hz channels are independent");
+            }
+            var step=new short[48000]; for(int i=0;i<12000;i++) step[i]=32767; for(int i=12000;i<24000;i++) step[i]=short.MinValue;
+            var data=Stereo(step); WaveformCorrection.Apply(data,model,CancellationToken.None);
+            Check(data.Length==192000 && Math.Abs((int)BitConverter.ToInt16(data,data.Length-4))<=1,model+" retains duration and filter tail settles to zero");
+            var replay=Stereo(step); WaveformCorrection.Apply(replay,model,CancellationToken.None);
+            Check(Convert.ToBase64String(data)==Convert.ToBase64String(replay),model+" filter state resets for each file");
+        }
+    }
     public static void Main() {
+        CircuitTests();
         var pulse=Stereo(new short[]{0,100,1000,300,-200,-800,-100,0,1,2,0,short.MinValue});
         var untouched=(byte[])pulse.Clone(); WaveformCorrection.Apply(untouched,WaveformCorrection.None,CancellationToken.None);
         Check(Convert.ToBase64String(pulse)==Convert.ToBase64String(untouched),"no correction is bit exact");
-        WaveformCorrection.Apply(untouched,"PC_6001",CancellationToken.None);
+        WaveformCorrection.Apply(untouched,"PC_8001mkII",CancellationToken.None);
         Check(Convert.ToBase64String(pulse)==Convert.ToBase64String(untouched),"unverified profiles do not alter PCM");
         foreach(string profile in TapeRecognition.Models) {
+            if(WaveformCorrection.CircuitSupported(profile)) continue;
             var shaped=(byte[])pulse.Clone(); WaveformCorrection.Apply(shaped,profile,CancellationToken.None);
             for(int i=0;i<shaped.Length;i+=2) if(Math.Sign(BitConverter.ToInt16(shaped,i))!=Math.Sign(BitConverter.ToInt16(pulse,i))) throw new Exception("changed transition: "+profile);
         }
-        Check(true,"all profiles preserve sampled sign transitions and silence");
+        Check(true,"logic and unsupported profiles preserve sampled sign transitions and silence");
         WaveformCorrection.Apply(pulse,"X1",CancellationToken.None);
         Check(BitConverter.ToInt16(pulse,4)==1000 && BitConverter.ToInt16(pulse,16)==-800 && BitConverter.ToInt16(pulse,32)==2 && BitConverter.ToInt16(pulse,44)==short.MinValue,"shaping uses local peaks without overflow or global noise amplification");
         var correctionCancel=new CancellationTokenSource(); correctionCancel.Cancel(); bool correctionStopped=false;
@@ -39,6 +83,18 @@ public static class Tests {
             Check(Convert.ToBase64String(payload)==Convert.ToBase64String(pulse),"export retains both channels exactly");
             File.WriteAllText(exported+".txt","legacy log"); Check(WaveformCorrection.ReadLog(exported+".txt")==WaveformCorrection.None,"legacy log defaults to no correction");
             File.WriteAllText(exported+".txt","波形補正機種: X1\r\n波形補正方式: logic-v1"); Check(WaveformCorrection.ReadLog(exported+".txt")=="X1","correction log restores model and algorithm version");
+            foreach(string model in new[]{"PC_6001","PC_6601SR","PC_8801","PC_8801mkIISR","MSX"}) {
+                File.WriteAllText(exported+".txt","波形補正機種: "+model+"\r\n波形補正方式: logic-v1");
+                Check(WaveformCorrection.ReadLog(exported+".txt")==WaveformCorrection.None,"old no-op log remains uncorrected: "+model);
+                var prepared=Decoder.PrepareForPlayback(exported,-6,0,false,CancellationToken.None,false,model);
+                File.WriteAllText(exported+".txt",prepared.OutputDescription);
+                Check(WaveformCorrection.ReadLog(exported+".txt")==model && prepared.OutputDescription.Contains("save-rc-v1"),"circuit log round trip: "+model);
+                var raw=(byte[])pulse.Clone(); WaveformCorrection.Apply(raw,model,CancellationToken.None); WaveformCorrection.Gain(raw,-6,CancellationToken.None);
+                Check(Convert.ToBase64String(raw)==Convert.ToBase64String(prepared.Pcm),"circuit precedes gain in export/playback: "+model);
+                var automatic=Decoder.PrepareForPlayback(exported,0,0,true,CancellationToken.None,true,model);
+                var reference=(byte[])pulse.Clone(); WaveformCorrection.Apply(reference,model,CancellationToken.None); DigitalGain.Normalize(reference,CancellationToken.None); DigitalGain.InvertPolarity(reference,CancellationToken.None);
+                Check(Convert.ToBase64String(reference)==Convert.ToBase64String(automatic.Pcm),"circuit precedes auto gain and inversion: "+model);
+            }
             File.WriteAllText(exported+".txt","波形補正機種: X1\r\n波形補正方式: future"); bool refused=false;
             try { WaveformCorrection.ReadLog(exported+".txt"); } catch(InvalidDataException) { refused=true; }
             Check(refused,"unknown algorithm version cannot silently reproduce a recording");

@@ -12,20 +12,38 @@ MZ_700、X1、FM_7、PASOPIA7、PYUTA、FP_1100、BML3について、以下の�
 
 補正 → ゲイン（手動または全体ピークから自動）→ 位相反転の順。元ファイルには書き込まない。無編集はこの波形補正をスキップする意味で、既存のPCM変換・ゲイン・位相反転は独立して適用される。
 
+## 実装済み：save-rc-v1
+
+PC_6001・PC_6601SR・PC_8801・PC_8801mkIISR・MSXを追加。上記logic-v1で論理波形を推定した後、48 kHzで双一次変換したIIRフィルターを適用する。MSXはSony資料の標準回路例であり、全メーカーの実機を同一と扱うものではない。[回路定数と出典](save-circuit-research.md)を参照。
+
+| 対象 | R1 | R2 | R3 | 直列C1 | 接地C2 |
+|---|---:|---:|---:|---:|---:|
+| PC-6001 / PC-6601SR | 2.2kΩ | 12kΩ | 100Ω | 0.1µF | 0.047µF |
+| PC-8801 / PC-8801mkIISR | 560Ω | 5.1kΩ | 33Ω | なし | 0.1µF |
+| MSX標準例 | 4.7kΩ | 4.7kΩ | 100Ω | 1µF | 0.022µF |
+
+R1の後のノードからC2が接地され、R2の後の出力ノードからR3が接地される。理想電圧源・外部負荷なしとして、内部の分圧器負荷L=R2+R3を含める。R3/(R1+L)の固定減衰を除去した相対伝達関数は、C1ありで `H(s)=C1*(R1+L)*s / (1+[C1*(R1+L)+C2*L]*s+C1*C2*R1*L*s²)`、C1なしで `H(s)=1/(1+[R1*L/(R1+L)]*C2*s)`。双一次変換は `s=96000*(1-z^-1)/(1+z^-1)`。PC-88初代のEMI部品・論理素子の出力抵抗・接続ケーブル・相手入力の負荷は未再現。
+
+フィルター状態はチャンネルごと、ファイルごとに独立し、内部計算はdouble。過渡応答でピークが元の矩形化PCMまたは32767を超える場合は、左右共通の固定倍率で全体を下げてから16 bitにする。その後に既存の手動／自動ゲインと位相反転を適用する。したがって自動ゲインで回路による相対的な減衰を取り戻せるが、端子電圧の校正にはならない。
+
+サンプル数は変えず、末尾に余韻を追加しない。ファイル内の無音にはフィルターの減衰尾が入る。矩形化後のフィルターでは位相・ゼロ交差時刻も変わるため、logic-v1の「サンプル符号位置を保持」は最終出力には当てはまらない。録音済みWAVのノイズや欠落を修復する機能ではない。
+
+検証：600/1200/2400/4800Hzの矩形入力について、独立した複素インピーダンス計算と基本波・第3高調波比を比較。無音、チャンネル独立、状態リセット、末尾の収束、ゲイン・反転順序、旧ログ互換を検査した。既存テストを含め180項目成功。ユーザー提供rogue-p6_nm.wavでは元・PC_6001補正後とも1ファイル、41,082復調バイトが一致し、Byte Error=0、Bit Error=4（双方同数）。これはPC内の復調比較で、実機ロード改善の検証ではない。
+
 ## 機種別の根拠と保留事項
 
 2026-10-12に回路図の追加調査を実施した。[未補正機種のSAVE出力回路調査](save-circuit-research.md)に、部品値・資料のページ・未確定部分を記録している。以下の「未補正」は現在の実装状態を表す。資料が存在しないという意味ではない。
 
 | 選択機種 | 調査で確認できた生成方法・参考実装 | 今回の扱い |
 |---|---|---|
-| PC_6001 / PC_6601SR | [MAME pc6001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc6001.cpp) のカセットコマンド処理に600/1200 baud選択。[PC6001VX tape.cpp](https://github.com/eighttails/PC6001VX/blob/master/src/tape.cpp) も調査。追加調査で両機種のSAVE受動回路の構成・主要定数の一致を確認。回路近似は未実装 | 未補正 |
+| PC_6001 / PC_6601SR | [MAME pc6001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc6001.cpp) のカセットコマンド処理に600/1200 baud選択。[PC6001VX tape.cpp](https://github.com/eighttails/PC6001VX/blob/master/src/tape.cpp) も調査。追加調査で両機種のSAVE受動回路の構成・主要定数の一致を確認。save-rc-v1を実装 | SAVE回路近似 |
 | PC_8001 / PC_8001mkII / PC_8001mkIISR | [MAME pc8001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8001.cpp) の8251・カセットFSK処理。追加調査で初代のRC・分圧構成とSRのHOIC経由出力を確認。初代の定数・mkIIの図・HOIC内部特性は未確定 | 未補正 |
-| PC_8801 / PC_8801mkIISR | [MAME pc8801.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8801.cpp) の8251処理。このコードだけではSAVE端子の再現根拠にならない。追加調査の書籍掲載回路図では両世代の主要RC・分圧定数を確認 | 未補正 |
+| PC_8801 / PC_8801mkIISR | [MAME pc8801.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8801.cpp) の8251処理。このコードだけではSAVE端子の再現根拠にならない。追加調査の書籍掲載回路図では両世代の主要RC・分圧定数を確認 | SAVE回路近似 |
 | MZ_80K / MZ_80B | [MAME mz80.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/mz80.cpp)。追加調査で両機種のメーカーサービス資料と録音各段の波形を確認。内蔵デッキのどの信号地点を再現するか検討が必要 | 未補正 |
 | MZ_700 | [MAME mz700_m.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/mz700_m.cpp) の `pio_port_c_w`。8255 port C bit 1がWDATAとして二値出力される | 論理波形近似 |
 | MZ_1500 | MZ-700互換性だけを根拠に出力回路も同一とは判断しない。I/O 1984年9月号の専用回路図で外部WRITE段の定数を確認。内蔵デッキ側の経路は未確定 | 未補正 |
 | X1 | [MAME x1.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/x1.cpp) のPPI port C bit 0によるカセット出力。アナログ段・各X1モデルの差は未再現 | 論理波形近似 |
-| MSX | [MSX2 Technical Handbook Chapter 5](https://github.com/Konamiman/MSX2-Technical-Handbook/blob/master/md/Chapter5a.md) に1200 bpsで1200/2400 Hz、2400 bpsで2400/4800 Hzをソフトウェアで生成する説明。追加調査でSonyのTechnical Data BookのSAVEサンプル回路・部品値を確認。標準例の回路近似は未実装 | 未補正 |
+| MSX | [MSX2 Technical Handbook Chapter 5](https://github.com/Konamiman/MSX2-Technical-Handbook/blob/master/md/Chapter5a.md) に1200 bpsで1200/2400 Hz、2400 bpsで2400/4800 Hzをソフトウェアで生成する説明。追加調査でSonyのTechnical Data BookのSAVEサンプル回路・部品値を確認。標準例のsave-rc-v1を実装 | SAVE回路近似 |
 | PYUTA | [MAME tutor.cpp](https://github.com/mamedev/mame/blob/master/src/mame/tomy/tutor.cpp) の `tutor_cassette_w`。アドレスのbit 5で二値出力。同ドライバー自身にもテープデータに関するTODOがある | 論理波形近似・特に実機検証が必要 |
 | FM_7 | [MAME fm7.cpp](https://github.com/mamedev/mame/blob/master/src/mame/fujitsu/fm7.cpp) のカセット／プリンター制御でbit 0が出力、bit 1がモーター | 論理波形近似 |
 | PASOPIA7 | [MAME pasopia7.cpp](https://github.com/mamedev/mame/blob/master/src/mame/toshiba/pasopia7.cpp) の `nmi_mask_w` でbit 4が二値出力。そこでの論理極性をWAVへ重ねて反転することはしない | 論理波形近似 |
@@ -39,10 +57,10 @@ MZ_700、X1、FM_7、PASOPIA7、PYUTA、FP_1100、BML3について、以下の�
 
 まず「無編集」でロードを確認し、同じ接続・音量で該当機種の補正を比較する。「再生＋録音測定」で認識機種も指定すると、既存のDumpListEditor検査で元音源・補正後の送信PCM・録音の復調データを比較できる。補正機種と認識機種は別設定。認識エンジンで一致しても実機成功の保証ではない。矩形化による平坦部をクリッピング判定が検出する場合もあるため、平坦部の数だけで失敗とは判断しない。
 
-次の段階のアナログ回路近似には、機種／基板世代が明確なサービス回路図の確認、部品値と負荷を使った伝達特性の計算、実機SAVE録音との比較が必要。未確認値を機種ごとのEQとして割り当ててはいない。
+追加5機種では回路定数を使った近似まで実装した。今後は実機SAVE録音との比較、出力素子・外部負荷の検証、残る機種の回路確認が必要。未確認値を機種ごとのEQとして割り当ててはいない。
 
 ## 書き出しと再現
 
 「補正WAV保存」は全体を100%で、PCM 48 kHz / 16 bit / stereoの別ファイルへ書き出す。測定速度・測定秒数・モニター音量・Windowsデバイス音量は含めない。適用ゲイン・位相・補正機種・方式バージョンを隣の `.wav.txt` に保存する。書き出したWAVは既に補正済みなので、再読込時は原則「無編集」、位相反転OFF、手動ゲイン0 dBで使用する。
 
-録音ログにも機種と方式を保存する。古い録音ログは無編集として再現し、未知の方式バージョンは再現を拒否する。書き出しだけでは認識・実機ロードは検査しない。
+録音ログにも機種と方式を保存する。補正指定のない古い録音ログは無編集として再現する。追加5機種を指定していても方式がlogic-v1のログは当時未補正だったため無編集で再現する。従来7機種のlogic-v1は従来処理を維持し、新しい5機種にはsave-rc-v1を記録する。未知または機種と不整合な方式は再現を拒否する。書き出しだけでは認識・実機ロードは検査しない。
