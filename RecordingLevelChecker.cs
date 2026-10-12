@@ -382,7 +382,7 @@ public sealed class MainForm : Form {
     public MainForm() : this(null) { }
     public MainForm(string configurationPath) {
         if(configurationPath!=null) settingsPath=configurationPath;
-        Text="PGA-TapeStudio — テープWAV再生・録音検査"; ClientSize=new Size(1080,940); MinimumSize=new Size(1020,900);
+        Text="PGA-TapeStudio — テープWAV再生・録音検査"; ClientSize=new Size(1080,800); MinimumSize=new Size(1020,740);
         Font=new Font("Yu Gothic UI",10); BackColor=Color.FromArgb(244,247,251);
         var layout=new TableLayoutPanel { Dock=DockStyle.Fill, Padding=new Padding(24), ColumnCount=1, RowCount=14 };
         Controls.Add(layout);
@@ -446,6 +446,7 @@ public sealed class MainForm : Form {
         layout.Controls.Add(Row(Label("表示幅",62),zoom,Label("ms   位置",80),position,Label("秒",25),peakButton,Label("出力",45),waveChannel,alignWaves));
         comparison.Multiline=true; comparison.ReadOnly=true; comparison.ScrollBars=ScrollBars.Vertical; comparison.Dock=DockStyle.Fill;
         comparison.Text="測定後、波形相似度の平均・最低値と区間別スコアを表示します（95%未満は要確認）。"; layout.Controls.Add(comparison);
+        OrganizeUi(layout);
         try {
             for(uint i=0;i<Native.waveInGetNumDevs();i++) input.Items.Add(Native.DeviceName(i,true));
             for(uint i=0;i<Native.waveOutGetNumDevs();i++) { string name=Native.DeviceName(i,false); output.Items.Add(name); monitorOutput.Items.Add(name); }
@@ -460,6 +461,51 @@ public sealed class MainForm : Form {
         recognitionEngine.TextChanged+=delegate { PersistSettings(); };
         EnableFileDrop(this);
         FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(busy) { cancellation.Cancel(); e.Cancel=true; status.Text="測定を停止しています。停止後に閉じてください。"; } else PersistSettings(); };
+    }
+    void OrganizeUi(TableLayoutPanel layout) {
+        layout.SuspendLayout(); layout.Controls.Clear(); layout.RowStyles.Clear(); layout.RowCount=7;
+        foreach(int height in new[]{46,48,48,46,50,42}) layout.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+        layout.Controls.Add(new Label { Text="PGA-TapeStudio",Font=new Font(Font.FontFamily,21,FontStyle.Bold),AutoSize=true });
+        file.Width=760; browse.Text="WAV・音声を選択";
+        layout.Controls.Add(Row(file,browse));
+        output.Width=330; monitorOutput.Width=330;
+        layout.Controls.Add(Row(Label("再生出力",80),output,Label("モニター出力",110),monitorOutput));
+        appliedGain.Width=135;
+        layout.Controls.Add(Row(autoGain,appliedGain,Label("出力ゲイン（手動）",145),gain,Label("dB",32),invertPhase));
+        playOnly.Text="▶ 再生（100%）"; playOnly.Width=165;
+        playOnly.BackColor=Color.FromArgb(33,93,159); playOnly.ForeColor=Color.White; playOnly.FlatStyle=FlatStyle.Flat;
+        start.Text="再生＋録音測定"; start.Width=155;
+        foreach(var button in new[]{playOnly,start,pauseButton,stop,save,inspectRecording,browse,chooseEngine,peakButton}) button.Height=32;
+        monitorVolumeSlider.Width=135;
+        layout.Controls.Add(Row(playOnly,pauseButton,stop,start,Label("モニター音量",110),monitorVolumeSlider,monitorVolumeLabel));
+        status.Font=new Font(Font.FontFamily,10); status.ForeColor=Color.FromArgb(55,72,93);
+        layout.Controls.Add(status);
+        var tabs=new TabControl { Dock=DockStyle.Fill,Name="workspaceTabs" };
+        var waveformPage=new TabPage("波形"); var settingsPage=new TabPage("測定・認識設定"); var resultsPage=new TabPage("検査結果");
+        tabs.TabPages.AddRange(new[]{waveformPage,settingsPage,resultsPage}); layout.Controls.Add(tabs);
+        var waves=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=4,Padding=new Padding(10) };
+        waves.RowStyles.Add(new RowStyle(SizeType.Absolute,28)); waves.RowStyles.Add(new RowStyle(SizeType.Absolute,14));
+        waves.RowStyles.Add(new RowStyle(SizeType.Percent,100)); waves.RowStyles.Add(new RowStyle(SizeType.Absolute,48));
+        waves.Controls.Add(numbers); waves.Controls.Add(meter); waves.Controls.Add(wave);
+        waves.Controls.Add(Row(Label("表示幅",62),zoom,Label("ms  位置",80),position,Label("秒",25),peakButton,Label("出力",45),waveChannel,alignWaves));
+        waveformPage.Controls.Add(waves);
+        var options=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=7,Padding=new Padding(14),AutoScroll=true };
+        foreach(int height in new[]{48,50,52,46,46,48}) options.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
+        options.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+        options.Controls.Add(Row(Label("録音入力",100),input,Label("48 kHz / 16 bit / モノラル",280)));
+        options.Controls.Add(Row(Label("測定速度",100),speed,Label("倍（周波数も変化）",200)));
+        options.Controls.Add(Row(Label("再生範囲",100),wholeFile,duration,Label("秒 ／ 再生のみ・測定に共通",300)));
+        options.Controls.Add(Row(Label("認識機種",100),recognitionModel,Label("測定後に自動検査。不要なら「認識検査なし」",450)));
+        recognitionEngine.Width=540;
+        options.Controls.Add(Row(Label("認識エンジン",100),recognitionEngine,chooseEngine));
+        options.Controls.Add(Row(inspectRecording));
+        options.Controls.Add(new Label { Dock=DockStyle.Fill,Text="録音測定：LINE OUT → 抵抗入りケーブル → MIC IN\r\n「再生（100%）」は測定速度に関係なく1倍速です。\r\n一部の範囲だけ再生する場合は「全部」をOFFにしてください。",ForeColor=Color.DimGray });
+        settingsPage.Controls.Add(options);
+        var results=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=new Padding(10) };
+        results.RowStyles.Add(new RowStyle(SizeType.Absolute,44)); results.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+        results.Controls.Add(Row(save)); results.Controls.Add(comparison); resultsPage.Controls.Add(results);
+        layout.ResumeLayout(true);
     }
     static string[] DeviceNames(ComboBox box) { var names=new string[box.Items.Count]; for(int i=0;i<names.Length;i++) names[i]=box.Items[i].ToString(); return names; }
     void RestoreSettings() {

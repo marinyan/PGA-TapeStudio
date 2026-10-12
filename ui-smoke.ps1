@@ -12,7 +12,7 @@ try {
     $form.Show()
     $form.PerformLayout()
     if ($SampleWaveforms) {
-        $view = $form.Controls[0].Controls | Where-Object { $_ -is [RecordingLevelChecker.WaveView] }
+        $view = $form.GetType().GetField('wave', [System.Reflection.BindingFlags]'Instance,NonPublic').GetValue($form)
         $sent = New-Object 'Int16[]' 4800
         $received = New-Object 'Int16[]' 5760
         for ($i = 0; $i -lt $sent.Length; $i++) {
@@ -33,6 +33,18 @@ try {
         $bitmap.Save((Join-Path $PSScriptRoot $name))
     } finally { $bitmap.Dispose() }
     Write-Output 'PASS: form construction, audio device enumeration and bitmap rendering'
+    $tabs = $form.Controls.Find('workspaceTabs', $true)[0]
+    if ($tabs.TabPages.Count -ne 3) { throw 'Workspace tabs missing' }
+    foreach ($tabIndex in @(1, 2)) {
+        $tabs.SelectedIndex = $tabIndex
+        [System.Windows.Forms.Application]::DoEvents()
+        $pageBitmap = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
+        try {
+            $form.DrawToBitmap($pageBitmap, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
+            $pageBitmap.Save((Join-Path $PSScriptRoot ('bin\ui-tab-' + $tabIndex + '.png')))
+        } finally { $pageBitmap.Dispose() }
+    }
+    $tabs.SelectedIndex = 0
     $flags = [System.Reflection.BindingFlags]'Instance,NonPublic'
     $whole = $form.GetType().GetField('wholeFile', $flags).GetValue($form)
     $whole.Checked = $false
