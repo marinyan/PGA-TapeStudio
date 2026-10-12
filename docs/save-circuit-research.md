@@ -55,6 +55,8 @@ PC-8001mkIISRは[PC-88のCMT増設を実施した作者の記事](https://kitahe
 
 [ElectrelicのPC-8001mk2分解記録](https://electrelic.com/electrelic/node/201?language=en)と[基板全体の原寸写真](https://electrelic.com/electrelic/sites/default/files/pictures/node/201/PC-8001mk2-15.JPG)を確認した。CMT端子の近くにD4013BC・D4081BC・D4030BC・D4024BCの刻印が読み取れる。これは部品の実装を確認する一次資料になるが、SAVE側とLOAD側の結線を写真だけで分離できていない。抵抗の色帯、コンデンサーの印字、裏面配線の確認も不足しているため、初代の550Ω・0.1µF等をそのまま採用する根拠にはしない。初代と同じ部品番号が見えても同じ用途・値とは限らない。
 
+ユーザー提供の[コジコジのオタク文化 情報局による分解動画](https://www.youtube.com/watch?v=sKg_G-3tDOc)も1080p映像で確認した。タイトルは「完全分解!!動かないPC-8001の故障原因を徹底検証【調査報告】」だが、説明と映像の対象はPC-8001mkII。[6:00付近の部品面](https://www.youtube.com/watch?v=sKg_G-3tDOc&t=360s)と[6:15付近のはんだ面](https://www.youtube.com/watch?v=sKg_G-3tDOc&t=375s)を対応させられる。基板番号72402331は上記Electrelicの写真と一致する。CMT端子近くのR35・R36・C104等の部品番号を確認する追加資料になる。一方、抵抗の色帯・コンデンサーの容量表示と、REC pin 4までの全配線は隣接フレームを含めても確定できなかった。この動画からRC定数が判明したとは扱わず、mkIIの補正係数は引き続き未設定とする。
+
 SRについては上記テクニカルマップの図を再確認したが、カスタム部品の内部回路・型番を特定できる追加資料には到達していない。1200/2400Hzの入力とMIC出力端子の接続だけでは、SAVE波形の丸まり方は決められない。ICの入出力仕様または実機SAVE端子の測定波形が必要。
 
 書籍の探索ではInternet Archiveのタイトル・媒体検索も実施し、[I/O別冊『PC活用研究 8001/8001mkII/8801』](https://archive.org/details/IoPc80018001mkii8801)を確認した。ただし検索用OCRの日本語認識が悪く、この本にmkIIのSAVE回路図が掲載されているとは確認できていない。機種名を含む所蔵資料が見つかったことと、必要な回路が見つかったことを区別する。今回の追加調査ではmkII/SRの補正係数は追加しない。
