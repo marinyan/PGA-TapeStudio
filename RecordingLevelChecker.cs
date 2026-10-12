@@ -364,11 +364,22 @@ public sealed class WaveView : Control {
     }
 }
 
+public sealed class AudioFilePicker : ComboBox {
+    public void CycleHistory(int delta) {
+        if(!Enabled || Items.Count==0 || delta==0) return;
+        int step=delta>0?-1:1;
+        SelectedIndex=SelectedIndex<0?0:Math.Max(0,Math.Min(Items.Count-1,SelectedIndex+step));
+    }
+    protected override void WndProc(ref Message m) {
+        if(m.Msg==0x020A) { CycleHistory((short)((m.WParam.ToInt64()>>16)&65535)); return; }
+        base.WndProc(ref m);
+    }
+}
 public sealed class MainForm : Form {
     ComboBox input=new ComboBox(), output=new ComboBox(), monitorOutput=new ComboBox();
     Button pauseButton=new Button(); MeasurementPause pauseControl;
     TrackBar monitorVolumeSlider=new TrackBar(); Label monitorVolumeLabel=new Label(); MonitorVolume monitorLevel=new MonitorVolume();
-    TextBox file=new TextBox(); NumericUpDown speed=new NumericUpDown(), gain=new NumericUpDown(), duration=new NumericUpDown(), zoom=new NumericUpDown(), position=new NumericUpDown();
+    AudioFilePicker file=new AudioFilePicker(); NumericUpDown speed=new NumericUpDown(), gain=new NumericUpDown(), duration=new NumericUpDown(), zoom=new NumericUpDown(), position=new NumericUpDown();
     Button browse=new Button(), start=new Button(), stop=new Button(), save=new Button(), peakButton=new Button();
     Label status=new Label(), numbers=new Label(); ProgressBar meter=new ProgressBar(); WaveView wave=new WaveView();
     TextBox comparison=new TextBox();
@@ -403,7 +414,7 @@ public sealed class MainForm : Form {
         monitorVolumeSlider.AccessibleName="モニター音量"; monitorVolumeLabel.Width=50; monitorVolumeLabel.Text="100%";
         monitorVolumeSlider.ValueChanged+=delegate { monitorLevel.Percent=monitorVolumeSlider.Value; monitorVolumeLabel.Text=monitorVolumeSlider.Value+"%"; PersistSettings(); };
         layout.Controls.Add(Row(Label("再生出力",90),output,Label("モニター",80),monitorOutput,Label("音量",45),monitorVolumeSlider,monitorVolumeLabel));
-        file.Width=650; file.ReadOnly=true; browse.Text="音声を選択"; browse.AutoSize=true; browse.Click+=Browse;
+        file.Width=650; file.DropDownStyle=ComboBoxStyle.DropDown; file.MaxDropDownItems=12; file.DropDownWidth=900; file.AccessibleName="音声ファイル履歴（ホイールで切り替え）"; browse.Text="音声を選択"; browse.AutoSize=true; browse.Click+=Browse;
         invertPhase.Text="位相反転（左右両方）"; invertPhase.AutoSize=true;
         layout.Controls.Add(Row(file,browse,invertPhase));
         SetupNumber(speed,0.5m,4,2,0.25m,2); SetupNumber(gain,-60,0,-18,1,0); SetupNumber(duration,1,86400,15,1,0);
@@ -413,13 +424,13 @@ public sealed class MainForm : Form {
         appliedGain.Text=""; appliedGain.Width=145;
         autoGain.CheckedChanged+=delegate { gain.Enabled=!busy && !autoGain.Checked; appliedGain.Text=autoGain.Checked?"再生前に全体解析":""; };
         layout.Controls.Add(Row(Label("測定速度",72),speed,Label("倍  出力",72),gain,Label("dB  測定",78),duration,Label("秒",28),wholeFile,autoGain,appliedGain));
-        start.Text="再生して測定"; start.Width=160; stop.Text="停止"; stop.Enabled=false; save.Text="WAV・結果を保存"; save.Width=165; save.Enabled=false;
+        start.Text="再生して測定"; start.Width=160; stop.Text="■ 停止"; stop.Enabled=false; save.Text="WAV・結果を保存"; save.Width=165; save.Enabled=false;
         start.Click+=Start; stop.Click+=delegate { if(cancellation!=null) cancellation.Cancel(); }; save.Click+=Save;
-        pauseButton.Text="一時停止"; pauseButton.Width=110; pauseButton.Enabled=false;
+        pauseButton.Text="⏸ 一時停止"; pauseButton.Width=110; pauseButton.Enabled=false;
         pauseButton.Click+=delegate {
             if(pauseControl==null) return;
             pauseControl.Requested=!pauseControl.Requested;
-            pauseButton.Text=pauseControl.Requested?"再開":"一時停止";
+            pauseButton.Text=pauseControl.Requested?"▶ 再開":"⏸ 一時停止";
             status.Text=pauseControl.Requested?"一時停止を要求しています…":"再開を要求しています…";
         };
         inspectRecording.Text="保存WAVを認識検査"; inspectRecording.Width=185; inspectRecording.Click+=InspectRecording;
@@ -458,6 +469,10 @@ public sealed class MainForm : Form {
         foreach(var c in new ComboBox[] { input,output,monitorOutput,waveChannel,recognitionModel }) c.SelectedIndexChanged+=delegate { PersistSettings(); };
         foreach(var c in new CheckBox[] { wholeFile,alignWaves,autoGain,invertPhase }) c.CheckedChanged+=delegate { PersistSettings(); };
         file.TextChanged+=delegate { PersistSettings(); };
+        file.SelectedIndexChanged+=delegate {
+            if(loadingSettings || busy || file.SelectedIndex<0) return;
+            status.Text=File.Exists(file.Text)?"履歴から選択しました。再生ボタンで開始します。":"履歴のファイルが見つかりません。移動先のファイルを選び直してください。";
+        };
         recognitionEngine.TextChanged+=delegate { PersistSettings(); };
         EnableFileDrop(this);
         FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(busy) { cancellation.Cancel(); e.Cancel=true; status.Text="測定を停止しています。停止後に閉じてください。"; } else PersistSettings(); };
@@ -526,6 +541,7 @@ public sealed class MainForm : Form {
                 string found=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),@"ChatGPT\SKYKID80\build\DumpListEditorVer084\DumpListEditorVer084\DumpListEditor.exe");
                 if(File.Exists(found)) recognitionEngine.Text=found;
             }
+            RefreshAudioHistory();
             if(File.Exists(preferences.LastFile)) file.Text=preferences.LastFile;
             if(input.SelectedIndex<0 || output.SelectedIndex<0 || monitorOutput.SelectedIndex<0) status.Text="保存した入出力が見つからないか同名です。使用するデバイスを選択してください。";
         } catch(Exception ex) { status.Text="設定を読み込めません。初期値を使用します："+ex.Message; }
@@ -542,6 +558,19 @@ public sealed class MainForm : Form {
         preferences.RecognitionEngine=recognitionEngine.Text; preferences.RecognitionModel=recognitionModel.SelectedIndex>0?recognitionModel.Text:"";
         preferences.MonitorVolumePercent=monitorVolumeSlider.Value;
         try { preferences.Save(settingsPath); } catch(Exception ex) { status.Text="設定を保存できません："+ex.Message; }
+    }
+    void RefreshAudioHistory() {
+        bool wasLoading=loadingSettings; loadingSettings=true;
+        string current=file.Text;
+        try {
+            file.Items.Clear();
+            foreach(var item in preferences.AudioHistory) if(!file.Items.Contains(item.Path)) file.Items.Add(item.Path);
+            if(File.Exists(preferences.LastFile) && !file.Items.Contains(preferences.LastFile)) file.Items.Add(preferences.LastFile);
+            file.Text=current;
+        } finally { loadingSettings=wasLoading; }
+    }
+    void RecordAudioUse(string path) {
+        preferences.RememberAudio(path); RefreshAudioHistory(); PersistSettings();
     }
     void EnableFileDrop(Control control) {
         control.AllowDrop=true;
@@ -568,9 +597,10 @@ public sealed class MainForm : Form {
     }
     void Browse(object sender,EventArgs e) { using(var d=new OpenFileDialog { Filter="音声ファイル|*.wav;*.mp3;*.flac;*.m4a;*.aac;*.ogg;*.wma;*.aiff;*.opus|すべてのファイル|*.*" }) if(d.ShowDialog()==DialogResult.OK) file.Text=d.FileName; }
     void SetBusy(bool value) {
+        file.Enabled=!value;
         busy=value; playOnly.Enabled=start.Enabled=browse.Enabled=input.Enabled=output.Enabled=monitorOutput.Enabled=speed.Enabled=gain.Enabled=wholeFile.Enabled=!value;
         autoGain.Enabled=invertPhase.Enabled=!value; gain.Enabled=!value && !autoGain.Checked;
-        if(!value) { pauseButton.Enabled=false; pauseButton.Text="一時停止"; }
+        if(!value) { pauseButton.Enabled=false; pauseButton.Text="⏸ 一時停止"; }
         duration.Enabled=!value && !wholeFile.Checked;
         recognitionModel.Enabled=recognitionEngine.Enabled=chooseEngine.Enabled=inspectRecording.Enabled=!value;
         stop.Enabled=value; save.Enabled=!value && result!=null;
@@ -586,6 +616,7 @@ public sealed class MainForm : Form {
         try {
             status.Text="再生用の音声を準備しています…";
             var prepared=await Task.Run(()=>Decoder.PrepareForPlayback(path,level,seconds,automatic,cancellation.Token,inverted));
+            RecordAudioUse(path);
             byte[] pcm=prepared.Pcm; appliedGain.Text=automatic?prepared.GainDb.ToString("+0.0;-0.0;0.0")+" dB":"";
             comparison.Text+= "\r\n"+prepared.OutputDescription;
             playbackPcm=pcm; position.Maximum=Math.Max(130,(decimal)pcm.Length/192000+10); position.Value=0; UpdateWaves();
@@ -613,6 +644,7 @@ public sealed class MainForm : Form {
         try {
             status.Text="音声を準備しています…";
             var prepared=await Task.Run(()=>Decoder.Prepare(path,rate,level,seconds,automatic,keep,cancellation.Token,inverted));
+            RecordAudioUse(path);
             byte[] pcm=prepared.Pcm;
             settings=settings.Replace("出力ゲイン: "+level+" dB","出力ゲイン: "+prepared.GainDb.ToString(CultureInfo.InvariantCulture)+" dB");
             settings+="自動ゲイン: "+automatic+"\r\n"+prepared.OutputDescription+"\r\n";

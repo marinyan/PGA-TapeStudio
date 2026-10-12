@@ -46,6 +46,15 @@ try {
     }
     $tabs.SelectedIndex = 0
     $flags = [System.Reflection.BindingFlags]'Instance,NonPublic'
+    $picker = $form.GetType().GetField('file', $flags).GetValue($form)
+    $remember = $form.GetType().GetMethod('RecordAudioUse', $flags)
+    $remember.Invoke($form, @([string](Join-Path $PSScriptRoot 'README.md'))) | Out-Null
+    $remember.Invoke($form, @([string](Join-Path $PSScriptRoot 'Tests.cs'))) | Out-Null
+    $picker.SelectedIndex = 0
+    $picker.CycleHistory(-120)
+    if (!$picker.Text.EndsWith('README.md')) { throw 'Wheel did not select history' }
+    $picker.CycleHistory(120)
+    if (!$picker.Text.EndsWith('Tests.cs')) { throw 'Reverse wheel did not select history' }
     $whole = $form.GetType().GetField('wholeFile', $flags).GetValue($form)
     $whole.Checked = $false
     if ($form.GetType().GetField('pitch', $flags)) { throw 'Obsolete pitch control remains' }
@@ -90,6 +99,9 @@ try {
     } finally { $second.Dispose() }
     $busyMethod = $form.GetType().GetMethod('SetBusy', $flags)
     $busyMethod.Invoke($form, @($true)) | Out-Null
+    $beforeWheel = $picker.Text
+    $picker.CycleHistory(-120)
+    if ($picker.Enabled -or $picker.Text -ne $beforeWheel) { throw 'Busy history selection changed' }
     if (!$volume.Enabled) { throw 'Live monitor volume disabled while busy' }
     if ($autoGain.Enabled -or $manualGain.Enabled) { throw 'Gain editable while busy' }
     if ($phase.Enabled) { throw 'Phase editable while busy' }

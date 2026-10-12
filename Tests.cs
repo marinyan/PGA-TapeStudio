@@ -16,6 +16,10 @@ public static class Tests {
         var recording=new short[source.Length+lag+24000]; for(int i=0;i<source.Length;i++) recording[i+lag]=(short)(source[i]*gain); return recording;
     }
     public static void Main() {
+        var history=new AppSettings(); history.RememberAudio(@"C:\audio\one.wav"); history.RememberAudio(@"C:\audio\two.wav"); history.RememberAudio(@"C:\AUDIO\ONE.wav");
+        Check(history.AudioHistory.Count==2 && history.AudioHistory[0].Uses==2 && history.AudioHistory[0].LastUsedUtc.Length>0,"audio history deduplicates paths and records use time and count");
+        for(int i=0;i<110;i++) history.RememberAudio(@"C:\audio\"+i+".wav");
+        Check(history.AudioHistory.Count==100 && history.AudioHistory[0].Path.EndsWith("109.wav"),"audio history retains the newest 100 files");
         byte[] phase=new byte[]{0,0,1,0,0xff,0x7f,0,0x80};
         DigitalGain.InvertPolarity(phase,CancellationToken.None);
         Check(BitConverter.ToInt16(phase,0)==0 && BitConverter.ToInt16(phase,2)==-1 && BitConverter.ToInt16(phase,4)==-32767 && BitConverter.ToInt16(phase,6)==32767,"polarity inversion covers both channels and saturates negative full scale");
@@ -59,6 +63,8 @@ public static class Tests {
         try {
             var prefs=new AppSettings { InputName="MIC 日本語", OutputName="OUT", WholeFile=false, Seconds=1234, Speed=3, Gain=-22, LastFile="C:\\audio test\\音声.wav", Zoom=100, WaveChannel=2, AlignWaves=false,AutoGain=true };
             prefs.Save(config); var loaded=AppSettings.Load(config);
+            prefs.RememberAudio(@"C:\audio\履歴.wav"); prefs.Save(config);
+            Check(AppSettings.Load(config).AudioHistory[0].Path.EndsWith("履歴.wav"),"audio history survives settings reload");
             Check(loaded.AutoGain,"automatic gain setting round trip");
             Check(!loaded.InvertPhase,"old settings default to normal polarity");
             prefs.InvertPhase=true; prefs.Save(config);

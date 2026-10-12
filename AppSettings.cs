@@ -1,10 +1,24 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Xml;
 using System.Xml.Serialization;
 
 namespace RecordingLevelChecker {
+public sealed class AudioHistoryItem {
+    public string Path="", LastUsedUtc="";
+    public int Uses;
+}
 public sealed class AppSettings {
+    public List<AudioHistoryItem> AudioHistory=new List<AudioHistoryItem>();
+    public void RememberAudio(string path) {
+        path=System.IO.Path.GetFullPath(path);
+        if(AudioHistory==null) AudioHistory=new List<AudioHistoryItem>();
+        var previous=AudioHistory.Find(x=>x!=null && string.Equals(x.Path,path,StringComparison.OrdinalIgnoreCase));
+        AudioHistory.RemoveAll(x=>x==null || string.Equals(x.Path,path,StringComparison.OrdinalIgnoreCase));
+        AudioHistory.Insert(0,new AudioHistoryItem { Path=path,LastUsedUtc=DateTime.UtcNow.ToString("O"),Uses=previous==null?1:Math.Min(int.MaxValue-1,previous.Uses)+1 });
+        if(AudioHistory.Count>100) AudioHistory.RemoveRange(100,AudioHistory.Count-100);
+    }
     public string InputName="", OutputName="", LastFile="", MonitorName="";
     public bool MonitorEnabled;
     public bool AutoGain;
@@ -15,6 +29,9 @@ public sealed class AppSettings {
     public bool WholeFile=true, AlignWaves=true;
     public int WaveChannel;
     public void Normalize() {
+        if(AudioHistory==null) AudioHistory=new List<AudioHistoryItem>();
+        AudioHistory.RemoveAll(x=>x==null || string.IsNullOrWhiteSpace(x.Path));
+        if(AudioHistory.Count>100) AudioHistory.RemoveRange(100,AudioHistory.Count-100);
         Speed=Math.Max(0.5m,Math.Min(4,Speed)); Gain=Math.Max(-60,Math.Min(0,Gain));
         Seconds=Math.Max(1,Math.Min(86400,Seconds)); Zoom=Math.Max(1,Math.Min(2000,Zoom));
         WaveChannel=Math.Max(0,Math.Min(2,WaveChannel));
