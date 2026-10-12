@@ -14,16 +14,18 @@ MZ_700、X1、FM_7、PASOPIA7、PYUTA、FP_1100、BML3について、以下の�
 
 ## 機種別の根拠と保留事項
 
+2026-10-12に回路図の追加調査を実施した。[未補正機種のSAVE出力回路調査](save-circuit-research.md)に、部品値・資料のページ・未確定部分を記録している。以下の「未補正」は現在の実装状態を表す。資料が存在しないという意味ではない。
+
 | 選択機種 | 調査で確認できた生成方法・参考実装 | 今回の扱い |
 |---|---|---|
-| PC_6001 / PC_6601SR | [MAME pc6001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc6001.cpp) のカセットコマンド処理に600/1200 baud選択。[PC6001VX tape.cpp](https://github.com/eighttails/PC6001VX/blob/master/src/tape.cpp) も調査。SAVE端子のアナログ特性やSR差を確定できていない | 未補正 |
-| PC_8001 / PC_8001mkII / PC_8001mkIISR | [MAME pc8001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8001.cpp) の8251・カセットFSK処理。世代別SAVE出力回路の定数は未確定 | 未補正 |
-| PC_8801 / PC_8801mkIISR | [MAME pc8801.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8801.cpp) の8251処理。カセット送信処理に未実装部分があり、SAVE端子の再現根拠にできない | 未補正 |
-| MZ_80K / MZ_80B | [MAME mz80.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/mz80.cpp)。MZ-700と共通のアナログ回路とは確認できていない | 未補正 |
+| PC_6001 / PC_6601SR | [MAME pc6001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc6001.cpp) のカセットコマンド処理に600/1200 baud選択。[PC6001VX tape.cpp](https://github.com/eighttails/PC6001VX/blob/master/src/tape.cpp) も調査。追加調査で両機種のSAVE受動回路の構成・主要定数の一致を確認。回路近似は未実装 | 未補正 |
+| PC_8001 / PC_8001mkII / PC_8001mkIISR | [MAME pc8001.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8001.cpp) の8251・カセットFSK処理。追加調査で初代のRC・分圧構成とSRのHOIC経由出力を確認。初代の定数・mkIIの図・HOIC内部特性は未確定 | 未補正 |
+| PC_8801 / PC_8801mkIISR | [MAME pc8801.cpp](https://github.com/mamedev/mame/blob/master/src/mame/nec/pc8801.cpp) の8251処理。このコードだけではSAVE端子の再現根拠にならない。追加調査の書籍掲載回路図では両世代の主要RC・分圧定数を確認 | 未補正 |
+| MZ_80K / MZ_80B | [MAME mz80.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/mz80.cpp)。追加調査で両機種のメーカーサービス資料と録音各段の波形を確認。内蔵デッキのどの信号地点を再現するか検討が必要 | 未補正 |
 | MZ_700 | [MAME mz700_m.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/mz700_m.cpp) の `pio_port_c_w`。8255 port C bit 1がWDATAとして二値出力される | 論理波形近似 |
-| MZ_1500 | MZ-700互換性だけを根拠に出力回路も同一とは判断しない。専用の回路資料は未確認 | 未補正 |
+| MZ_1500 | MZ-700互換性だけを根拠に出力回路も同一とは判断しない。I/O 1984年9月号の専用回路図で外部WRITE段の定数を確認。内蔵デッキ側の経路は未確定 | 未補正 |
 | X1 | [MAME x1.cpp](https://github.com/mamedev/mame/blob/master/src/mame/sharp/x1.cpp) のPPI port C bit 0によるカセット出力。アナログ段・各X1モデルの差は未再現 | 論理波形近似 |
-| MSX | [MSX2 Technical Handbook Chapter 5](https://github.com/Konamiman/MSX2-Technical-Handbook/blob/master/md/Chapter5a.md) に1200 bpsで1200/2400 Hz、2400 bpsで2400/4800 Hzをソフトウェアで生成する説明。出力フィルターまで検証したプロファイルは未完成 | 未補正 |
+| MSX | [MSX2 Technical Handbook Chapter 5](https://github.com/Konamiman/MSX2-Technical-Handbook/blob/master/md/Chapter5a.md) に1200 bpsで1200/2400 Hz、2400 bpsで2400/4800 Hzをソフトウェアで生成する説明。追加調査でSonyのTechnical Data BookのSAVEサンプル回路・部品値を確認。標準例の回路近似は未実装 | 未補正 |
 | PYUTA | [MAME tutor.cpp](https://github.com/mamedev/mame/blob/master/src/mame/tomy/tutor.cpp) の `tutor_cassette_w`。アドレスのbit 5で二値出力。同ドライバー自身にもテープデータに関するTODOがある | 論理波形近似・特に実機検証が必要 |
 | FM_7 | [MAME fm7.cpp](https://github.com/mamedev/mame/blob/master/src/mame/fujitsu/fm7.cpp) のカセット／プリンター制御でbit 0が出力、bit 1がモーター | 論理波形近似 |
 | PASOPIA7 | [MAME pasopia7.cpp](https://github.com/mamedev/mame/blob/master/src/mame/toshiba/pasopia7.cpp) の `nmi_mask_w` でbit 4が二値出力。そこでの論理極性をWAVへ重ねて反転することはしない | 論理波形近似 |
